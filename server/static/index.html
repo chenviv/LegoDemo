@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LEGO Brick Rotator</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 1200px;
+            width: 100%;
+            padding: 30px;
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 2em;
+        }
+
+        .content {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 30px;
+        }
+
+        .unity-container {
+            background: #000;
+            border-radius: 10px;
+            overflow: hidden;
+            aspect-ratio: 16/9;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #unity-canvas {
+            width: 100%;
+            height: 100%;
+        }
+
+        .controls {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .control-group {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+        }
+
+        .control-group h3 {
+            color: #667eea;
+            margin-bottom: 15px;
+            font-size: 1.2em;
+        }
+
+        .input-group {
+            margin-bottom: 15px;
+        }
+
+        .input-group:last-child {
+            margin-bottom: 0;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #555;
+            font-weight: 500;
+        }
+
+        input[type="number"] {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        input[type="number"]:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        button {
+            width: 100%;
+            padding: 12px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        button:hover {
+            background: #5568d3;
+        }
+
+        .info {
+            background: #e7f3ff;
+            padding: 15px;
+            border-radius: 10px;
+            border-left: 4px solid #667eea;
+        }
+
+        .info p {
+            color: #555;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        @media (max-width: 768px) {
+            .content {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧱 LEGO Brick Rotator</h1>
+
+        <div class="content">
+            <div class="unity-container">
+                <canvas id="unity-canvas"></canvas>
+            </div>
+
+            <div class="controls">
+                <div class="control-group">
+                    <h3>Euler Angles</h3>
+
+                    <div class="input-group">
+                        <label for="x-angle">X Rotation (degrees)</label>
+                        <input type="number" id="x-angle" value="0" step="5" min="-360" max="360">
+                    </div>
+
+                    <div class="input-group">
+                        <label for="y-angle">Y Rotation (degrees)</label>
+                        <input type="number" id="y-angle" value="0" step="5" min="-360" max="360">
+                    </div>
+
+                    <div class="input-group">
+                        <label for="z-angle">Z Rotation (degrees)</label>
+                        <input type="number" id="z-angle" value="0" step="5" min="-360" max="360">
+                    </div>
+
+                    <button onclick="applyRotation()">Apply Rotation</button>
+                </div>
+
+                <div class="info">
+                    <p><strong>How to use:</strong></p>
+                    <p>Enter the Euler angles (X, Y, Z) in degrees and click "Apply Rotation" to rotate the LEGO brick in 3D space.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // API configuration
+        const API_URL = 'http://localhost:5000/api/rotation';
+
+        function applyRotation() {
+            const xAngle = parseFloat(document.getElementById('x-angle').value) || 0;
+            const yAngle = parseFloat(document.getElementById('y-angle').value) || 0;
+            const zAngle = parseFloat(document.getElementById('z-angle').value) || 0;
+
+            // Send to backend
+            fetch(API_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    x: xAngle,
+                    y: yAngle,
+                    z: zAngle
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Rotation applied:', data);
+
+                // Send to Unity if available
+                if (typeof unityInstance !== 'undefined') {
+                    unityInstance.SendMessage('LegoBrick', 'SetRotation',
+                        JSON.stringify({ x: xAngle, y: yAngle, z: zAngle }));
+                }
+            })
+            .catch(error => {
+                console.error('Error applying rotation:', error);
+            });
+        }
+
+        // Allow Enter key to apply rotation
+        document.addEventListener('keypress', function(event) {
+            if (event.key === 'Enter') {
+                applyRotation();
+            }
+        });
+
+        // Unity WebGL loader
+        var unityInstance;
+        var canvas = document.querySelector("#unity-canvas");
+
+        var script = document.createElement("script");
+        script.src = "webgl/Build/WebGLBuild.loader.js";
+        script.onload = function() {
+            createUnityInstance(canvas, {
+                dataUrl: "webgl/Build/WebGLBuild.data.gz",
+                frameworkUrl: "webgl/Build/WebGLBuild.framework.js.gz",
+                codeUrl: "webgl/Build/WebGLBuild.wasm.gz",
+                streamingAssetsUrl: "StreamingAssets",
+                companyName: "DefaultCompany",
+                productName: "LegoBrickRotator",
+                productVersion: "1.0",
+            }).then((instance) => {
+                unityInstance = instance;
+                console.log("Unity loaded successfully!");
+            }).catch((message) => {
+                console.error("Unity loading failed:", message);
+            });
+        };
+        document.body.appendChild(script);
+    </script>
+</body>
+</html>
