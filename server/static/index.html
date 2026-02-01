@@ -56,6 +56,11 @@
         #unity-canvas {
             width: 100%;
             height: 100%;
+            outline: none;
+        }
+
+        #unity-canvas:focus {
+            outline: none;
         }
 
         .controls {
@@ -157,25 +162,23 @@
 
                     <div class="input-group">
                         <label for="x-angle">X Rotation (degrees)</label>
-                        <input type="number" id="x-angle" value="0" step="5" min="-360" max="360">
+                        <input type="number" id="x-angle" value="0" step="any">
                     </div>
 
                     <div class="input-group">
                         <label for="y-angle">Y Rotation (degrees)</label>
-                        <input type="number" id="y-angle" value="0" step="5" min="-360" max="360">
+                        <input type="number" id="y-angle" value="0" step="any">
                     </div>
 
                     <div class="input-group">
                         <label for="z-angle">Z Rotation (degrees)</label>
-                        <input type="number" id="z-angle" value="0" step="5" min="-360" max="360">
+                        <input type="number" id="z-angle" value="0" step="any">
                     </div>
-
-                    <button onclick="applyRotation()">Apply Rotation</button>
                 </div>
 
                 <div class="info">
                     <p><strong>How to use:</strong></p>
-                    <p>Enter the Euler angles (X, Y, Z) in degrees and click "Apply Rotation" to rotate the LEGO brick in 3D space.</p>
+                    <p>Enter the Euler angles (X, Y, Z) in degrees and press Enter to rotate the LEGO brick in 3D space.</p>
                 </div>
             </div>
         </div>
@@ -227,14 +230,78 @@
         // Unity WebGL loader
         var unityInstance;
         var canvas = document.querySelector("#unity-canvas");
+        var isInputFocused = false;
+
+        // Prevent Unity from capturing keyboard input when typing in input fields
+        document.querySelectorAll('input[type="number"]').forEach(input => {
+            input.addEventListener('focus', function() {
+                isInputFocused = true;
+                // Disable Unity canvas completely when input is focused
+                if (canvas) {
+                    canvas.style.pointerEvents = 'none';
+                    canvas.blur();
+                    canvas.tabIndex = -1;
+                }
+            });
+            input.addEventListener('blur', function() {
+                isInputFocused = false;
+                // Re-enable Unity canvas
+                if (canvas) {
+                    canvas.style.pointerEvents = 'auto';
+                    canvas.tabIndex = -1; // Keep it non-focusable
+                }
+            });
+
+            // Stop all keyboard events from propagating except Enter
+            input.addEventListener('keydown', function(e) {
+                if (e.key !== 'Enter') {
+                    e.stopPropagation();
+                }
+            }, false);
+            input.addEventListener('keyup', function(e) {
+                if (e.key !== 'Enter') {
+                    e.stopPropagation();
+                }
+            }, false);
+            input.addEventListener('keypress', function(e) {
+                if (e.key !== 'Enter') {
+                    e.stopPropagation();
+                }
+            }, false);
+        });
+
+        // Completely block Unity from receiving keyboard events when input is focused (except Enter)
+        document.addEventListener('keydown', function(e) {
+            if (isInputFocused && e.key !== 'Enter') {
+                e.stopImmediatePropagation();
+                return false;
+            }
+        }, true);
+
+        document.addEventListener('keyup', function(e) {
+            if (isInputFocused && e.key !== 'Enter') {
+                e.stopImmediatePropagation();
+                return false;
+            }
+        }, true);
+
+        document.addEventListener('keypress', function(e) {
+            if (isInputFocused && e.key !== 'Enter') {
+                e.stopImmediatePropagation();
+                return false;
+            }
+        }, true);
 
         var script = document.createElement("script");
-        script.src = "webgl/Build/WebGLBuild.loader.js";
+        script.src = "webgl/Build/webgl.loader.js";
         script.onload = function() {
+            // Set canvas as non-focusable by default
+            canvas.tabIndex = -1;
+
             createUnityInstance(canvas, {
-                dataUrl: "webgl/Build/WebGLBuild.data.gz",
-                frameworkUrl: "webgl/Build/WebGLBuild.framework.js.gz",
-                codeUrl: "webgl/Build/WebGLBuild.wasm.gz",
+                dataUrl: "webgl/Build/webgl.data.gz",
+                frameworkUrl: "webgl/Build/webgl.framework.js.gz",
+                codeUrl: "webgl/Build/webgl.wasm.gz",
                 streamingAssetsUrl: "StreamingAssets",
                 companyName: "DefaultCompany",
                 productName: "LegoBrickRotator",

@@ -48,5 +48,10 @@ def health_check():
     """Health check endpoint"""
     return jsonify({'status': 'healthy'})
 
+@app.route('/webgl/<path:path>')
+def serve_webgl(path):
+    """Serve WebGL files"""
+    return send_from_directory('static/webgl', path)
+
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)

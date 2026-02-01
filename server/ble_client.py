@@ -2,7 +2,9 @@ import asyncio
 import struct
 import requests
 import math
+import time
 from bleak import BleakClient, BleakScanner
+from bleak.exc import BleakError
 
 # BLE UUIDs from ESP32
 SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
@@ -13,6 +15,11 @@ API_URL = "http://localhost:5000/api/rotation"
 
 # Device name
 DEVICE_NAME = "ESP32_MPU6050_BLE"
+
+# Reconnection settings
+MAX_RECONNECT_ATTEMPTS = 5
+RECONNECT_DELAY_BASE = 2  # Base delay in seconds (will use exponential backoff)
+CONNECTION_TIMEOUT = 10.0  # Connection timeout in seconds
 
 # Rotation state
 current_rotation = {"x": 0.0, "y": 0.0, "z": 0.0}
@@ -85,16 +92,19 @@ class ComplementaryFilter:
 # Update global filter with deadband
 comp_filter = ComplementaryFilter(alpha=0.98, gyro_deadband=3.0)
 
+# Last timestamp for dt calculation
+last_timestamp = None
+
 class SensorData:
     """Class to parse the binary sensor data from ESP32"""
     def __init__(self, data):
-        # Unpack 7 floats (4 bytes each = 28 bytes total) directly into named variables
-        (self.temp,
+        # Unpack 1 uint + 6 floats (4 bytes each = 28 bytes total) directly into named variables
+        (self.timestamp,
          self.acc_x, self.acc_y, self.acc_z,
-         self.gyro_x, self.gyro_y, self.gyro_z) = struct.unpack('<7f', data)
+         self.gyro_x, self.gyro_y, self.gyro_z) = struct.unpack('<I6f', data)
 
     def __str__(self):
-        return (f"Temp: {self.temp:.1f}°C | "
+        return (f"[T={self.timestamp}ms] "
                 f"Acc: X={self.acc_x:.2f} Y={self.acc_y:.2f} Z={self.acc_z:.2f} | "
                 f"Gyro: X={self.gyro_x:.1f} Y={self.gyro_y:.1f} Z={self.gyro_z:.1f}")
 
@@ -114,12 +124,21 @@ def send_rotation_to_api():
 
 async def notification_handler(sender, data):
     """Handle BLE notifications from ESP32"""
+    global last_timestamp
+
     try:
         # Parse the binary data
         sensor_data = SensorData(data)
 
-        # Print raw sensor data
-        print(f"RAW: {sensor_data}")
+        # Calculate dt from timestamp
+        if last_timestamp is None:
+            dt = 0.1  # Default for first reading
+        else:
+            dt = (sensor_data.timestamp - last_timestamp) / 1000.0  # Convert ms to seconds
+        last_timestamp = sensor_data.timestamp
+
+        # Print raw sensor data and dt
+        print(f"RAW: {sensor_data} | dt={dt*1000:.1f}ms")
 
         # Apply complementary filter (returns filtered angles directly)
         angle_x, angle_y, angle_z = comp_filter.update(
@@ -129,7 +148,7 @@ async def notification_handler(sender, data):
             sensor_data.gyro_x,
             sensor_data.gyro_y,
             sensor_data.gyro_z,
-            dt=0.1  # 100ms between updates (matches ESP32 sending rate)
+            dt=dt
         )
 
         # Store angles for axis mapping
@@ -173,33 +192,77 @@ async def find_device():
 
 
 async def connect_and_listen():
-    """Main function to connect to ESP32 and listen for data"""
+    """Main function to connect to ESP32 and listen for data with reconnection support"""
+    reconnect_count = 0
 
-    # Find the device
-    address = await find_device()
-    if address is None:
-        return
-
-    # Connect to the device
-    print(f"Connecting to {address}...")
-
-    async with BleakClient(address) as client:
-        print(f"✓ Connected to {DEVICE_NAME}")
-
-        # Enable notifications
-        await client.start_notify(CHARACTERISTIC_UUID, notification_handler)
-        print("✓ Listening for sensor data with Complementary Filter...")
-        print("=" * 80)
-
-        # Keep the connection alive
+    while reconnect_count < MAX_RECONNECT_ATTEMPTS:
         try:
-            while True:
-                await asyncio.sleep(1)
-        except KeyboardInterrupt:
-            print("\nStopping...")
-        finally:
-            await client.stop_notify(CHARACTERISTIC_UUID)
-            print("✓ Disconnected")
+            # Find the device
+            address = await find_device()
+            if address is None:
+                reconnect_count += 1
+                if reconnect_count < MAX_RECONNECT_ATTEMPTS:
+                    delay = RECONNECT_DELAY_BASE * (2 ** reconnect_count)
+                    print(f"Retrying in {delay} seconds... (Attempt {reconnect_count + 1}/{MAX_RECONNECT_ATTEMPTS})")
+                    await asyncio.sleep(delay)
+                continue
+
+            # Reset reconnect counter on successful device discovery
+            reconnect_count = 0
+
+            # Connect to the device with timeout
+            print(f"Connecting to {address}...")
+
+            async with BleakClient(address, timeout=CONNECTION_TIMEOUT) as client:
+                print(f"✓ Connected to {DEVICE_NAME}")
+
+                # Enable notifications
+                await client.start_notify(CHARACTERISTIC_UUID, notification_handler)
+                print("✓ Listening for sensor data with Complementary Filter...")
+                print("=" * 80)
+
+                # Keep the connection alive
+                try:
+                    while True:
+                        # Check if still connected
+                        if not client.is_connected:
+                            print("\n⚠ Connection lost! Attempting to reconnect...")
+                            break
+                        await asyncio.sleep(1)
+                except KeyboardInterrupt:
+                    print("\nStopping...")
+                    await client.stop_notify(CHARACTERISTIC_UUID)
+                    print("✓ Disconnected")
+                    return  # Exit completely on user interrupt
+                finally:
+                    if client.is_connected:
+                        await client.stop_notify(CHARACTERISTIC_UUID)
+
+        except asyncio.TimeoutError:
+            reconnect_count += 1
+            print(f"\n✗ Connection timeout!")
+            if reconnect_count < MAX_RECONNECT_ATTEMPTS:
+                delay = RECONNECT_DELAY_BASE * (2 ** reconnect_count)
+                print(f"Retrying in {delay} seconds... (Attempt {reconnect_count + 1}/{MAX_RECONNECT_ATTEMPTS})")
+                await asyncio.sleep(delay)
+
+        except BleakError as e:
+            reconnect_count += 1
+            print(f"\n✗ BLE Error: {e}")
+            if reconnect_count < MAX_RECONNECT_ATTEMPTS:
+                delay = RECONNECT_DELAY_BASE * (2 ** reconnect_count)
+                print(f"Retrying in {delay} seconds... (Attempt {reconnect_count + 1}/{MAX_RECONNECT_ATTEMPTS})")
+                await asyncio.sleep(delay)
+
+        except Exception as e:
+            reconnect_count += 1
+            print(f"\n✗ Unexpected error: {e}")
+            if reconnect_count < MAX_RECONNECT_ATTEMPTS:
+                delay = RECONNECT_DELAY_BASE * (2 ** reconnect_count)
+                print(f"Retrying in {delay} seconds... (Attempt {reconnect_count + 1}/{MAX_RECONNECT_ATTEMPTS})")
+                await asyncio.sleep(delay)
+
+    print(f"\n✗ Failed to connect after {MAX_RECONNECT_ATTEMPTS} attempts. Exiting.")
 
 
 def main():
@@ -210,13 +273,17 @@ def main():
     print(f"Looking for device: {DEVICE_NAME}")
     print(f"API endpoint: {API_URL}")
     print(f"Filter alpha: {comp_filter.alpha} (98% gyro, 2% accel)")
+    print(f"Max reconnection attempts: {MAX_RECONNECT_ATTEMPTS}")
+    print(f"Connection timeout: {CONNECTION_TIMEOUT}s")
     print("=" * 80)
     print()
 
     try:
         asyncio.run(connect_and_listen())
+    except KeyboardInterrupt:
+        print("\n✓ Program terminated by user")
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"\n✗ Fatal error: {e}")
 
 
 if __name__ == "__main__":
