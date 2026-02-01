@@ -124,7 +124,7 @@ void loop() {
     pCharacteristic->setValue((uint8_t *)&data, sizeof(SensorData));
     pCharacteristic->notify();
 
-    // Debug: Print values
+    // Debug Print values
     Serial.printf(
         "\n--- Timestamp: %ums (device should be FLAT and STILL) ---\n",
         data.timestamp);
@@ -138,7 +138,7 @@ void loop() {
   }
 
   // Yield to RTOS and reduce power consumption
-  delay(1); // Allows task switching and reduces busy-waiting
+  delay(1);
 
   // Connection handling
   if (!deviceConnected && oldDeviceConnected) {

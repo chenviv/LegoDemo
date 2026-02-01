@@ -23,10 +23,10 @@ This installs:
 Your ESP32 is already configured! It:
 - Reads MPU6050 accelerometer and gyroscope data
 - Broadcasts as "ESP32_MPU6050_BLE"
-- Sends 28-byte binary packets every second containing:
-  - Temperature
-  - Acceleration (X, Y, Z)
-  - Gyroscope (X, Y, Z)
+- Sends 28-byte binary packets every 100ms containing:
+  - Timestamp (milliseconds since boot)
+  - Acceleration (X, Y, Z) in g
+  - Gyroscope (X, Y, Z) in °/s
 
 ### 3. Running the System
 
@@ -47,37 +47,36 @@ python ble_client.py
 
 ## How It Works
 
-### Two Rotation Modes
+### Data Processing Flow
 
-The script supports two ways to calculate rotation:
+The system processes sensor data through multiple stages:
 
-#### Mode 1: Accelerometer (Default - ENABLED)
-- Uses tilt angles from accelerometer
-- Provides **absolute orientation** relative to gravity
-- Best for: Showing the physical tilt of the ESP32
-- Calculates pitch (X) and roll (Y) directly
+1. **ESP32** reads MPU6050 sensor → sends raw data (acc + gyro) via BLE (28 bytes)
+2. **Python BLE Client** receives data → applies complementary filter for sensor fusion
+3. **Angle Calculation** → combines accelerometer (absolute) + gyroscope (rate) for stable angles
+4. **Drift Compensation** → detects stationary state and resets gyro drift
+5. **Axis Mapping** → converts ESP32 coordinate system to Unity's coordinate system
+6. **Flask API** → receives mapped rotation → stores current state
+7. **Unity WebGL** → polls API → updates 3D brick rotation
 
-#### Mode 2: Gyroscope (Commented out)
-- Integrates angular velocity over time
-- Provides **relative rotation** from starting position
-- Best for: Tracking rotation changes
-- Can drift over time
+### Axis Mapping
 
-To switch modes, edit `ble_client.py` and comment/uncomment the appropriate section in `notification_handler()`.
-
-### Adjusting Sensitivity
-
-In `ble_client.py`, change this line:
+The BLE client converts ESP32 coordinate system to Unity's coordinate system:
 ```python
-SENSITIVITY = 0.5  # Increase for more rotation, decrease for less
+AXIS_MAPPING = {
+    'unity_x': ('x', False),  # Pitch (front/back tilt)
+    'unity_y': ('z', False),  # Yaw (rotation)
+    'unity_z': ('y', True),   # Roll (left/right tilt, inverted)
+}
 ```
 
 ## Troubleshooting
 
 ### "Could not find ESP32_MPU6050_BLE"
 - Make sure ESP32 is powered on
-- Check Serial Monitor shows "Waiting for client..."
+- Check Serial Monitor shows "Waiting for client (28-byte binary packets with timestamp)..."
 - ESP32 should be within Bluetooth range (~10m)
+- Verify device completed calibration (should show offset values)
 - Try running the scan again
 
 ### "Permission denied" or Bluetooth errors
@@ -90,73 +89,87 @@ SENSITIVITY = 0.5  # Increase for more rotation, decrease for less
 
 ### Connection keeps dropping
 - Move ESP32 closer to computer
-- Check USB power is stable for ESP32
+- Check power is stable for ESP32
 - Reduce interference from other Bluetooth devices
 
 ### Rotation is too sensitive/not sensitive enough
-- Adjust `SENSITIVITY` in `ble_client.py`
-- Try switching between accelerometer and gyroscope modes
+- The Python client applies a complementary filter with configurable parameters
+- Adjust `alpha` (gyro vs accel weight) or `gyro_deadband` in the `ComplementaryFilter` class
+- Modify axis mapping or implement custom scaling in `ble_client.py`
+- See "Advanced Usage" section for customizing the sensor fusion filter
 
 ### Flask API not receiving data
 - Make sure `app.py` is running in another terminal
 - Check the API_URL in `ble_client.py` matches your Flask server
-- Look for "✓ Sent rotation" messages in the BLE client output
+- Look for "Sent rotation" messages in the BLE client output
 
 ## Data Format
 
-The ESP32 sends this struct (28 bytes):
+### ESP32 Firmware Output (28 bytes)
+
+The ESP32 sends this struct:
 ```cpp
 struct SensorData {
-  float temp;   // 0-3:   Temperature (°C)
-  float accX;   // 4-7:   Accel X (g)
-  float accY;   // 8-11:  Accel Y (g)
-  float accZ;   // 12-15: Accel Z (g)
-  float gyroX;  // 16-19: Gyro X (°/s)
-  float gyroY;  // 20-23: Gyro Y (°/s)
-  float gyroZ;  // 24-27: Gyro Z (°/s)
-}
+  uint32_t timestamp; // 0-3:   Timestamp (ms)
+  float accX;         // 4-7:   Accel X (g)
+  float accY;         // 8-11:  Accel Y (g)
+  float accZ;         // 12-15: Accel Z (g)
+  float gyroX;        // 16-19: Gyro X (°/s)
+  float gyroY;        // 20-23: Gyro Y (°/s)
+  float gyroZ;        // 24-27: Gyro Z (°/s)
+} __attribute__((packed));
 ```
 
-Python unpacks it as:
+### Python BLE Client Parsing
+
+The Python client correctly unpacks this data:
 ```python
-struct.unpack('<7f', data)  # 7 floats (temp, accX, accY, accZ, gyroX, gyroY, gyroZ), little-endian
+struct.unpack('<I6f', data)  # 1 uint32 + 6 floats, little-endian (28 bytes)
+# Returns: (timestamp, accX, accY, accZ, gyroX, gyroY, gyroZ)
 ```
+
+The client then applies a **complementary filter** to fuse accelerometer and gyroscope data into stable rotation angles, with drift compensation for when the device is stationary.
 
 ## Advanced Usage
 
-### Using Gyroscope Instead of Accelerometer
+### Understanding the Complementary Filter
 
-Edit `ble_client.py` in the `notification_handler()` function:
+The BLE client implements sensor fusion using a complementary filter that combines:
+- **Accelerometer**: Provides absolute orientation (stable long-term, noisy short-term)
+- **Gyroscope**: Provides rotation rate (accurate short-term, drifts long-term)
 
+The filter formula:
 ```python
-# Comment out accelerometer:
-# update_rotation_from_accelerometer(...)
-
-# Uncomment gyroscope:
-update_rotation_from_gyro(
-    sensor_data.gyro_x,
-    sensor_data.gyro_y,
-    sensor_data.gyro_z,
-    dt=1.0
-)
+alpha = 0.98  # Weight factor (98% gyro, 2% accelerometer)
+angle = alpha * (previous_angle + gyro_rate * dt) + (1 - alpha) * accel_angle
 ```
 
-### Combining Both Sensors
+### Drift Compensation
 
-For best results, you could use a complementary filter:
-- Accelerometer for long-term stability
-- Gyroscope for short-term accuracy
+When the device is stationary (low gyro values for extended time), the filter automatically:
+1. Detects stationary state (gyro magnitude < threshold for multiple readings)
+2. Gradually resets angles toward accelerometer values
+3. Prevents long-term drift accumulation
 
-This would require implementing sensor fusion (like a Kalman filter).
+### Customizing Filter Parameters
 
-### Changing Update Rate
+In `ble_client.py`, adjust these parameters:
+```python
+class ComplementaryFilter:
+    def __init__(self, alpha=0.98, gyro_deadband=2.0):
+        self.alpha = alpha              # Higher = trust gyro more (0.95-0.99)
+        self.gyro_deadband = gyro_deadband  # Degrees/sec below which gyro is ignored
+        # Other internal state: angle_x, angle_y, angle_z, stationary_counter
+```
 
-In the ESP32 code, change this line:
+The ESP32 uses a hardware timer interrupt for precise timing. Current interval: **100ms** (10 Hz).
+
+To change it, modify this line in the firmware:
 ```cpp
-if (deviceConnected && (millis() - timer > 1000)) {  // Change 1000 to desired ms
+unsigned long measurementInterval = 100; // milliseconds
 ```
 
-Faster updates = smoother rotation, but more CPU usage.
+Faster updates = smoother rotation, but more power consumption and BLE bandwidth usage.
 
 ## Testing Without ESP32
 
@@ -186,15 +199,18 @@ ESP32 BLE to LEGO Brick Rotator
 ================================================================================
 Looking for device: ESP32_MPU6050_BLE
 API endpoint: http://localhost:5000/api/rotation
-Sensitivity: 0.5
+Filter alpha: 0.98 (98% gyro, 2% accel)
+Max reconnection attempts: 5
+Connection timeout: 10.0s
 ================================================================================
 
 Scanning for 'ESP32_MPU6050_BLE'...
-✓ Found ESP32_MPU6050_BLE at XX:XX:XX:XX:XX:XX
+Found ESP32_MPU6050_BLE at XX:XX:XX:XX:XX:XX
 Connecting to XX:XX:XX:XX:XX:XX...
 ✓ Connected to ESP32_MPU6050_BLE
-✓ Listening for sensor data...
-================================================================================
-Temp: 28.5°C | Acc: X=0.05 Y=-0.02 Z=0.98 | Gyro: X=0.3 Y=-0.1 Z=0.0
-✓ Sent rotation: X=2.9° Y=-2.9° Z=0.0°
+
+RAW: [T=12345ms] Acc: X=0.01 Y=-0.02 Z=1.00 | Gyro: X=0.5 Y=-0.3 Z=0.0 | dt=100.0ms
+ESP32: Angles: X=2.9° Y=-2.9° Z=0.0°
+Unity: X=2.9° Y=0.0° Z=2.9°
+✓ Sent rotation: X=2.9° Y=0.0° Z=2.9°
 ```

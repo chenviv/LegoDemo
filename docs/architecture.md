@@ -5,14 +5,20 @@
 The LegoDemo project consists of three main components that work together to create an interactive LEGO building experience with motion sensing capabilities.
 
 ```
-┌─────────────────┐          ┌─────────────────┐          ┌─────────────────┐
-│                 │          │                 │          │                 │
-│  Unity WebGL    │  HTTP    │  Flask Server   │   BLE    │   ESP32 + IMU   │
-│  (Frontend)     │◄────────►│  + BLE Client   │◄────────►│   (Firmware)    │
-│                 │          │                 │          │                 │
-└─────────────────┘          └─────────────────┘          └─────────────────┘
-     Browser                   Python Server              Physical Device
+┌─────────────────┐          ┌─────────────────────────────┐          ┌─────────────────┐
+│                 │          │  Python Server (2 processes)│          │                 │
+│  Unity WebGL    │  HTTP    │  ┌────────────────────────┐ │   BLE    │   ESP32 + IMU   │
+│  (Frontend)     │◄────────►│  │ Flask Server (app.py)  │ │          │   (Firmware)    │
+│                 │          │  └────────────────────────┘ │◄────────►│                 │
+│                 │          │  ┌────────────────────────┐ │          │                 │
+│                 │          │  │ BLE Client (ble_      │ │          │                 │
+│                 │          │  │   client.py)          │ │          │                 │
+│                 │          │  └────────────────────────┘ │          │                 │
+└─────────────────┘          └─────────────────────────────┘          └─────────────────┘
+     Browser                   Flask + BLE on same machine            Physical Device
 ```
+
+**Note:** Flask server and BLE client are separate processes that communicate via HTTP (BLE client posts to Flask API endpoints).
 
 ## Component Details
 
@@ -23,28 +29,31 @@ The LegoDemo project consists of three main components that work together to cre
   - Real-time LEGO brick rendering
   - Motion-based manipulation
   - Interactive building interface
-- **Output**: WebGL build deployed to `/build/webgl`
+- **Output**: WebGL build deployed to `server/static/webgl/`
 
 ### 2. Server (Backend + BLE Bridge)
-- **Technology**: Python Flask + BLE libraries
+- **Technology**: Python Flask + BLE libraries (Bleak)
 - **Purpose**: Web server and Bluetooth communication bridge
-- **Components**:
-  - `app.py`: Flask application serving WebGL and API endpoints
-  - `ble_client.py`: Bluetooth Low Energy client for ESP32 communication
+- **Architecture**: Two separate processes
+  - `app.py`: Flask server (serves WebGL, provides REST API, stores rotation state)
+  - `ble_client.py`: BLE client (connects to ESP32, processes sensor data, posts to Flask API)
 - **Responsibilities**:
-  - Serve Unity WebGL application
-  - Manage BLE connection to ESP32
-  - Bridge data between web client and hardware
-  - Real-time data synchronization
+  - Serve Unity WebGL application and static files
+  - Provide REST API endpoints (`/api/rotation` GET/POST)
+  - Connect to ESP32 via Bluetooth Low Energy
+  - Process sensor data (complementary filter, axis mapping, drift compensation)
+  - Bridge data between ESP32 hardware and web client
+  - Real-time data synchronization via HTTP polling
 
 ### 3. Firmware (Hardware)
 - **Technology**: Arduino/ESP32, MPU6050 sensor
 - **Purpose**: Motion sensing and data transmission
 - **Features**:
   - 6-axis motion sensing (accelerometer + gyroscope)
-  - BLE server implementation
-  - Continuous data streaming
-  - Low-latency sensor readings
+  - BLE server broadcasting as "ESP32_MPU6050_BLE"
+  - Hardware timer interrupt for precise 100ms sampling (10 Hz)
+  - 28-byte binary packets (timestamp + 6 sensor values)
+  - Automatic calibration on startup (requires flat surface)
 
 ## Data Flow
 
@@ -64,12 +73,17 @@ The LegoDemo project consists of three main components that work together to cre
 
 ### Request Flow
 
-1. **User Interaction** → Unity WebGL captures user input
-2. **HTTP Request** → Sent to Flask server
-3. **BLE Command** → Server forwards to ESP32 via BLE
-4. **Sensor Response** → ESP32 sends motion data back
-5. **Data Update** → Server pushes to Unity WebGL
-6. **Visual Update** → Unity renders changes
+**Current Implementation** (One-way: ESP32 → Server → Unity):
+
+1. **ESP32 Sensor Reading** → MPU6050 data read every 100ms via timer interrupt
+2. **BLE Transmission** → ESP32 broadcasts sensor data via BLE notifications
+3. **Python BLE Client** → Receives notifications and processes data (complementary filter, axis mapping, drift compensation)
+4. **HTTP POST** → BLE client posts rotation data to Flask API (`/api/rotation`)
+5. **State Storage** → Flask stores current rotation in memory
+6. **Unity Polling** → Unity WebGL polls Flask API (`GET /api/rotation`) for updates
+7. **Visual Update** → Unity renders LEGO brick with new rotation
+
+**Note**: User input in Unity web interface can also POST rotation values directly to the API for manual control.
 
 ## Communication Protocols
 
@@ -79,7 +93,13 @@ The LegoDemo project consists of three main components that work together to cre
   - Low power consumption
   - Suitable for continuous data streaming
   - Good range (10-100m depending on environment)
-- **Data Format**: Binary/JSON encoded sensor readings
+- **Data Format**: 28-byte binary packets (little-endian)
+  - 1 × uint32_t timestamp (4 bytes) - milliseconds since boot
+  - 6 × float sensor values (24 bytes) - accX, accY, accZ, gyroX, gyroY, gyroZ
+  - Update rate: 10 Hz (every 100ms via hardware timer)
+- **Service UUID**: `4fafc201-1fb5-459e-8fcc-c5c9c331914b`
+- **Characteristic UUID**: `beb5483e-36e1-4688-b7f5-ea07361b26a8`
+- **Device Name**: `ESP32_MPU6050_BLE`
 
 ### HTTP
 - **Purpose**: Browser-to-server communication
@@ -99,41 +119,72 @@ The LegoDemo project consists of three main components that work together to cre
 
 ## Current Limitations
 
-### 1. Coupled Architecture
-- BLE client and web server run in the same process
-- **Impact**: Server must be on machine with Bluetooth hardware
-- **Future**: Consider separating into microservices
+### 1. Polling-Based Architecture
+- Unity WebGL polls Flask API for rotation updates instead of real-time push
+- **Impact**: Higher latency (~polling interval) and unnecessary network traffic
+- **Future**: Implement WebSocket for real-time bidirectional communication
 
-### 2. Single Device Support
+### 2. Separate Processes Required
+- Flask server and BLE client run as separate processes (requires manual coordination)
+- **Impact**: Two terminals needed, manual startup sequence, no integrated logging
+- **Future**: Consider process manager (systemd, supervisord) or integrate into single service
+
+### 3. Single Device Support
 - Currently supports one ESP32 device at a time
+- No device identifier or multi-device management
 - **Future**: Multi-device support for collaborative building
 
-### 3. Local Deployment Only
-- Bluetooth requirement limits deployment options
-- **Future**: BLE bridge as separate service for cloud deployment
+### 4. Local BLE Requirement
+- BLE client must run on machine with Bluetooth hardware near ESP32
+- **Impact**: Limits deployment flexibility (can't easily deploy Flask server to cloud)
+- **Future**: BLE bridge as separate microservice communicating with Flask via WebSocket/MQTT
+
+### 5. In-Memory State Storage
+- Current rotation state stored in Flask server memory (lost on restart)
+- **Impact**: No persistence, no historical data
+- **Future**: Database for persistent state and analytics
 
 ## Future Architecture Improvements
 
-### 1. Separated BLE Bridge
+### 1. WebSocket for Real-Time Communication
 
-**Current Issue**: BLE client and web server are coupled in one process, limiting deployment flexibility.
+**Current Issue**: Unity WebGL polls Flask API repeatedly, causing latency and unnecessary requests.
+
+**Proposed Architecture**:
+```
+┌─────────────┐         ┌─────────────┐         ┌─────────────┐
+│   Unity     │   WS    │   Flask     │   WS    │ BLE Client  │
+│   WebGL     │◄───────►│   Server    │◄───────►│   Process   │
+└─────────────┘         └─────────────┘         └─────────────┘
+```
+
+**Benefits**:
+- Real-time bidirectional communication
+- Lower latency (push updates immediately)
+- Reduced network overhead
+- Better for multiple concurrent users
+
+### 2. Separated BLE Bridge Service
+
+**Current Issue**: BLE client and Flask server run as separate processes without coordination, limiting scalability and deployment options.
 
 **Proposed Architecture**:
 ```
 ┌─────────────┐         ┌─────────────┐         ┌─────────────┐         ┌─────────────┐
-│   Unity     │  HTTP   │   Flask     │  WS/MQ  │ BLE Bridge  │   BLE   │   ESP32     │
+│   Unity     │  WS/HTTP│   Flask     │  WS/MQTT│ BLE Bridge  │   BLE   │   ESP32     │
 │   WebGL     │◄───────►│   Server    │◄───────►│   Service   │◄───────►│   Device    │
 └─────────────┘         └─────────────┘         └─────────────┘         └─────────────┘
    Browser                Cloud/Any             Local Machine           Physical Device
 ```
 
 **Benefits**:
-- Deploy web server anywhere (cloud)
-- Scale web server independently
-- Multiple BLE bridges for multiple devices
-- Better security isolation
+- Deploy Flask server anywhere (cloud, containers)
+- Scale Flask server independently of BLE hardware
+- Multiple BLE bridges for multiple physical locations
+- Better security isolation between components
+- Centralized management and monitoring
 
-### 2. Multi-Device Support via Device UID
+### 3. Multi-Device Support via Device UID
 
 **Current Limitation**: The `ble_client.py` connects to a single hardcoded device name and doesn't differentiate between multiple BLE servers.
 
@@ -172,9 +223,11 @@ devices = {
 - Scale to sensor networks with multiple ESP32 devices
 - Better device management and monitoring
 
-### 3. Scalability Considerations
+### 4. Scalability Considerations
 
-**Multi-User Support**:
+**Current State**: Single-process Flask server with polling, in-memory state, single ESP32 device.
+
+**Production Requirements**:
 - Message queue (Redis/RabbitMQ) for component communication
 - Session management to isolate user data
 - WebSocket implementation for real-time updates per user (future)
@@ -204,7 +257,7 @@ devices = {
 
 1. **Hardware Development**: Edit firmware → Upload to ESP32
 2. **Backend Development**: Modify server code → Restart Flask
-3. **Frontend Development**: Edit Unity → Build WebGL → Deploy to `/build/webgl`
+3. **Frontend Development**: Edit Unity → Build WebGL → Deploy to `server/static/webgl/`
 4. **Testing**: Run server → Connect ESP32 → Open browser → Test interaction
 
 ## Monitoring and Debugging

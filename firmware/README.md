@@ -47,24 +47,30 @@ Download from [arduino.cc](https://www.arduino.cc/en/software)
 
 ### 4. Configure and Upload
 
-1. Open `LEGO.ino` in Arduino IDE
+1. Open `ESP32_LEGO_BLE/ESP32_LEGO_BLE.ino` in Arduino IDE
 2. Select your ESP32 board: Tools → Board → ESP32 Arduino → (your board)
 3. Select the correct port: Tools → Port → (your COM/USB port)
 4. Click Upload (→) button
 
+**Important**: Place the ESP32 on a flat, level surface before powering on for proper calibration.
+
 ## BLE Configuration
 
 The firmware implements a BLE server with the following characteristics:
-- Device name: "LEGO_ESP32" (configurable in code)
-- Service UUID: (check LEGO.ino for current UUIDs)
-- Characteristic UUID: (check LEGO.ino for current UUIDs)
+- Device name: "ESP32_MPU6050_BLE"
+- Service UUID: `4fafc201-1fb5-459e-8fcc-c5c9c331914b`
+- Characteristic UUID: `beb5483e-36e1-4688-b7f5-ea07361b26a8`
+- Data format: 28-byte binary packets (timestamp + 6 floats)
+- Update rate: 100ms (10 Hz) via hardware timer interrupt
 
 ## Features
 
-- Real-time motion data collection from MPU6050
+- Real-time motion data collection from MPU6050 (accelerometer + gyroscope)
 - BLE server for wireless communication
-- Sensor calibration on startup
-- Continuous data streaming
+- Automatic sensor calibration on startup (must be on flat surface)
+- Hardware timer interrupt for precise 100ms sampling
+- 28-byte binary packet format (timestamp + 6 sensor values)
+- Continuous data streaming at 10 Hz
 
 ## Troubleshooting
 
@@ -85,11 +91,11 @@ The firmware implements a BLE server with the following characteristics:
 
 ## Configuration
 
-Edit `LEGO.ino` to customize:
-- BLE device name
+Edit `ESP32_LEGO_BLE.ino` to customize:
+- BLE device name (currently: `"ESP32_MPU6050_BLE"`)
 - Service/Characteristic UUIDs
-- Sensor sampling rate
-- Data format
+- Measurement interval (currently: `100` ms)
+- Data packet structure
 
 ## License
 

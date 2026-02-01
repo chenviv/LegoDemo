@@ -114,7 +114,7 @@ def send_rotation_to_api():
     try:
         response = requests.post(API_URL, json=current_rotation, timeout=1)
         if response.status_code == 200:
-            print(f"✓ Sent rotation: X={current_rotation['x']:.1f}° "
+            print(f"Sent rotation: X={current_rotation['x']:.1f}° "
                   f"Y={current_rotation['y']:.1f}° Z={current_rotation['z']:.1f}°")
         else:
             print(f"✗ API error: {response.status_code}")
@@ -184,7 +184,7 @@ async def find_device():
 
     for device in devices:
         if device.name == DEVICE_NAME:
-            print(f"✓ Found {DEVICE_NAME} at {device.address}")
+            print(f"Found {DEVICE_NAME} at {device.address}")
             return device.address
 
     print(f"✗ Could not find {DEVICE_NAME}")
@@ -214,11 +214,11 @@ async def connect_and_listen():
             print(f"Connecting to {address}...")
 
             async with BleakClient(address, timeout=CONNECTION_TIMEOUT) as client:
-                print(f"✓ Connected to {DEVICE_NAME}")
+                print(f"Connected to {DEVICE_NAME}")
 
                 # Enable notifications
                 await client.start_notify(CHARACTERISTIC_UUID, notification_handler)
-                print("✓ Listening for sensor data with Complementary Filter...")
+                print("Listening for sensor data...")
                 print("=" * 80)
 
                 # Keep the connection alive
@@ -232,7 +232,7 @@ async def connect_and_listen():
                 except KeyboardInterrupt:
                     print("\nStopping...")
                     await client.stop_notify(CHARACTERISTIC_UUID)
-                    print("✓ Disconnected")
+                    print("Disconnected")
                     return  # Exit completely on user interrupt
                 finally:
                     if client.is_connected:
@@ -268,7 +268,7 @@ async def connect_and_listen():
 def main():
     """Entry point"""
     print("=" * 80)
-    print("ESP32 BLE to LEGO Brick Rotator (Complementary Filter)")
+    print("ESP32 BLE to LEGO Brick Rotator")
     print("=" * 80)
     print(f"Looking for device: {DEVICE_NAME}")
     print(f"API endpoint: {API_URL}")
@@ -281,7 +281,7 @@ def main():
     try:
         asyncio.run(connect_and_listen())
     except KeyboardInterrupt:
-        print("\n✓ Program terminated by user")
+        print("\nProgram terminated by user")
     except Exception as e:
         print(f"\n✗ Fatal error: {e}")
 
