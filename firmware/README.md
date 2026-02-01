@@ -15,6 +15,12 @@ Connect MPU6050 to ESP32:
 - GND → GND
 - SCL → GPIO 22 (default I2C clock)
 - SDA → GPIO 21 (default I2C data)
+- AD0 → GND (optional - sets I2C address to 0x68; leave floating for 0x69)
+
+**Note**: If you connect AD0 to GND, you must update the I2C address in the code from the default 0x69 to 0x68.
+
+![Wiring Schematic](schematics.PNG)
+
 
 ## Software Requirements
 
@@ -83,6 +89,7 @@ The firmware implements a BLE server with the following characteristics:
 - Check I2C wiring
 - Verify MPU6050 power supply (3.3V)
 - Try sensor calibration
+- If AD0 is connected to GND, ensure code uses I2C address 0x68 instead of default 0x69
 
 ### BLE not visible:
 - Ensure Bluetooth is enabled on client device
