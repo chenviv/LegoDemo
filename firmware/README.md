@@ -58,8 +58,8 @@ Download from [arduino.cc](https://www.arduino.cc/en/software)
 
 The firmware implements a BLE server with the following characteristics:
 - Device name: "ESP32_MPU6050_BLE"
-- Service UUID: `4fafc201-1fb5-459e-8fcc-c5c9c331914b`
-- Characteristic UUID: `beb5483e-36e1-4688-b7f5-ea07361b26a8`
+- Service UUID: `c10299b1-b9ba-451a-ad8c-17baeecd9480`
+- Characteristic UUID: `657b9056-09f8-4e0f-9d37-f76b6756e95e`
 - Data format: 28-byte binary packets (timestamp + 6 floats)
 - Update rate: 100ms (10 Hz) via hardware timer interrupt
 

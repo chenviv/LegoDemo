@@ -186,8 +186,8 @@ Or use the web interface input fields.
 ## BLE UUIDs Reference
 
 ```
-Service UUID:        4fafc201-1fb5-459e-8fcc-c5c9c331914b
-Characteristic UUID: beb5483e-36e1-4688-b7f5-ea07361b26a8
+Service UUID:        c10299b1-b9ba-451a-ad8c-17baeecd9480
+Characteristic UUID: 657b9056-09f8-4e0f-9d37-f76b6756e95e
 ```
 
 ## Example Output

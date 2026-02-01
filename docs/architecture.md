@@ -97,8 +97,8 @@ The LegoDemo project consists of three main components that work together to cre
   - 1 × uint32_t timestamp (4 bytes) - milliseconds since boot
   - 6 × float sensor values (24 bytes) - accX, accY, accZ, gyroX, gyroY, gyroZ
   - Update rate: 10 Hz (every 100ms via hardware timer)
-- **Service UUID**: `4fafc201-1fb5-459e-8fcc-c5c9c331914b`
-- **Characteristic UUID**: `beb5483e-36e1-4688-b7f5-ea07361b26a8`
+- **Service UUID**: `c10299b1-b9ba-451a-ad8c-17baeecd9480`
+- **Characteristic UUID**: `657b9056-09f8-4e0f-9d37-f76b6756e95e`
 - **Device Name**: `ESP32_MPU6050_BLE`
 
 ### HTTP

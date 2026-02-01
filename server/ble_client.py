@@ -7,8 +7,8 @@ from bleak import BleakClient, BleakScanner
 from bleak.exc import BleakError
 
 # BLE UUIDs from ESP32
-SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
-CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8"
+SERVICE_UUID = "c10299b1-b9ba-451a-ad8c-17baeecd9480"
+CHARACTERISTIC_UUID = "657b9056-09f8-4e0f-9d37-f76b6756e95e"
 
 # Flask API endpoint
 API_URL = "http://localhost:5000/api/rotation"

@@ -28,8 +28,8 @@ struct SensorData {
   float gyroZ;        // Gyro Z (°/s) - 4 bytes
 } __attribute__((packed));
 
-#define SERVICE_UUID "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
-#define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
+#define SERVICE_UUID "c10299b1-b9ba-451a-ad8c-17baeecd9480"
+#define CHARACTERISTIC_UUID "657b9056-09f8-4e0f-9d37-f76b6756e95e"
 
 void IRAM_ATTR onTimer() { readSensor = true; }
 
