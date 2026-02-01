@@ -15,10 +15,10 @@ The LegoDemo project consists of three main components that work together to cre
 │                 │          │  │   client.py)          │ │          │                 │
 │                 │          │  └────────────────────────┘ │          │                 │
 └─────────────────┘          └─────────────────────────────┘          └─────────────────┘
-     Browser                   Flask + BLE on same machine            Physical Device
+     Browser                   Server + BLE Client (separate)         Physical Device
 ```
 
-**Note:** Flask server and BLE client are separate processes that communicate via HTTP (BLE client posts to Flask API endpoints).
+**Note:** Flask server (`server/`) and BLE client (`ble_client/`) are in separate folders and can run on different machines. They communicate via HTTP (BLE client posts to Flask API endpoints).
 
 ## Component Details
 
@@ -31,21 +31,32 @@ The LegoDemo project consists of three main components that work together to cre
   - Interactive building interface
 - **Output**: WebGL build deployed to `server/static/webgl/`
 
-### 2. Server (Backend + BLE Bridge)
-- **Technology**: Python Flask + BLE libraries (Bleak)
-- **Purpose**: Web server and Bluetooth communication bridge
-- **Architecture**: Two separate processes
-  - `app.py`: Flask server (serves WebGL, provides REST API, stores rotation state)
-  - `ble_client.py`: BLE client (connects to ESP32, processes sensor data, posts to Flask API)
+### 2. Server (Backend)
+- **Technology**: Python Flask
+- **Purpose**: Web server and REST API
+- **Location**: `server/` folder
 - **Responsibilities**:
   - Serve Unity WebGL application and static files
+  - Provide REST API for rotation data
+  - Store current rotation state in memory
+  - Can be containerized with Docker
+
+### 3. BLE Client (Hardware Bridge)
+- **Technology**: Python + Bleak (BLE library)
+- **Purpose**: Bluetooth communication bridge
+- **Location**: `ble_client/` folder (separate from server)
+- **Responsibilities**:
+  - Connect to ESP32 via Bluetooth Low Energy
+  - Process sensor data with complementary filter
+  - Apply axis mapping and drift compensation
+  - Post rotation data to Flask API
   - Provide REST API endpoints (`/api/rotation` GET/POST)
   - Connect to ESP32 via Bluetooth Low Energy
   - Process sensor data (complementary filter, axis mapping, drift compensation)
   - Bridge data between ESP32 hardware and web client
   - Real-time data synchronization via HTTP polling
 
-### 3. Firmware (Hardware)
+### 4. Firmware (Hardware)
 - **Technology**: Arduino/ESP32, MPU6050 sensor
 - **Purpose**: Motion sensing and data transmission
 - **Features**:

@@ -1,28 +1,24 @@
 # Server
 
-Flask web server and BLE client for the LegoDemo project.
+Flask web server for the LegoDemo project.
 
 ## Features
 
-- **Flask Server (`app.py`)**: Serves Unity WebGL build and provides REST API for rotation data
-- **BLE Client (`ble_client.py`)**: Connects to ESP32 via Bluetooth and forwards sensor data to Flask API
-- Real-time data bridging between ESP32 hardware and web interface
-
-**Note:** The Flask server and BLE client run as separate processes.
+- Serves Unity WebGL build from `static/webgl/`
+- REST API for rotation data storage and retrieval
+- CORS enabled for Unity WebGL cross-origin requests
+- Health check endpoint
+- Can be containerized with Docker
 
 ## Requirements
 
 - Python 3.8+
-- Bluetooth hardware (BLE capable) for the BLE client
-- ESP32 device running the LegoDemo firmware
 
 ## Dependencies
 
 All Python dependencies are listed in `requirements.txt`:
 - **Flask** (3.0.0) - Web framework for serving WebGL and REST API
 - **flask-cors** (4.0.0) - Enable CORS for Unity WebGL cross-origin requests
-- **bleak** (0.21.1) - Bluetooth Low Energy library for ESP32 communication
-- **requests** (2.31.0) - HTTP library for BLE client to post data to Flask API
 
 
 ## Installation
@@ -33,39 +29,38 @@ pip install -r requirements.txt
 
 ## Configuration
 
-Edit `ble_client.py` to configure your ESP32 device settings:
-- BLE device name (default: `"ESP32_MPU6050_BLE"`)
-- Service and characteristic UUIDs (if you modified the firmware)
-- Complementary filter parameters (`alpha`, `gyro_deadband`)
-- Axis mapping for Unity coordinate system
+The Flask server runs on port 5000 by default. To change this, edit `app.py`:
+```python
+if __name__ == '__main__':
+    app.run(debug=True, host='0.0.0.0', port=5000)
+```
 
 ## Usage
 
-The system requires running **two separate processes**:
-
-**Terminal 1 - Start Flask Server:**
+**Start Flask Server:**
 ```bash
 python app.py
 ```
 Server will start on `http://localhost:5000`
 
-**Terminal 2 - Start BLE Client:**
+**Or use Docker:**
 ```bash
-python ble_client.py
+docker build -t lego-server .
+docker run -p 5000:5000 lego-server
 ```
-BLE client will scan for, connect to, and stream data from the ESP32 device.
 
-**Terminal 3 - Access Web Interface:**
+**Access Web Interface:**
 - Open `http://localhost:5000` in your browser
-- The Unity WebGL visualization will load and display real-time rotation from the ESP32
+- The Unity WebGL visualization will load
+- Rotation data comes from the BLE client (see `../ble_client/README.md`)
 
 ## Files
 
 - `app.py` - Flask application
-- `ble_client.py` - Bluetooth Low Energy client
+- `Dockerfile` - Docker containerization
 - `static/index.html` - Web UI
 - `static/webgl/` - Unity WebGL build artifacts
-- `requirements.txt` - Python dependencies
+- `requirements.txt` - Python dependencies (Flask + flask-cors)
 
 ## Unity WebGL Build Setup
 
@@ -92,18 +87,30 @@ server/
 4. Click **Build** (not Build And Run)
 5. Choose output directory: `../server/static/webgl`
 
+## API Endpoints
+
+- `GET /` - Serves the main HTML page
+- `GET /api/rotation` - Get current rotation angles
+- `POST /api/rotation` - Update rotation angles
+- `GET /health` - Health check endpoint
+- `GET /webgl/<path>` - Serve WebGL build files
+
+## Docker
+
+The server can be containerized:
+```bash
+docker build -t lego-server .
+docker run -p 5000:5000 lego-server
+```
+
 ## Notes
 
-**Architecture:** The Flask server (`app.py`) and BLE client (`ble_client.py`) run as separate processes:
-- **Flask Server**: Serves web UI, provides REST API, stores current rotation state in memory
-- **BLE Client**: Connects to ESP32 via Bluetooth, processes sensor data (complementary filter, axis mapping), posts to Flask API
-
-This separation allows the Flask server to run anywhere while the BLE client must run on a machine with Bluetooth hardware.
-
-For production deployment, consider:
-- Separating the BLE client into a standalone bridge service
-- Using WebSocket instead of polling for real-time updates
-- Adding a database for persistent state storage
+- Rotation state is stored in memory (resets on restart)
+- The BLE client runs separately in `../ble_client/`
+- For production, consider:
+  - Using a database for persistent state
+  - WebSocket for real-time updates
+  - Load balancing for scalability
 
 
 

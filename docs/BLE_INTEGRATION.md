@@ -11,12 +11,18 @@ The ESP32 sends sensor data via BLE → Python script receives it → Updates Fl
 ### 1. Install Python Dependencies
 
 ```bash
+# Flask server
+cd server
+pip install -r requirements.txt
+
+# BLE client
+cd ../ble_client
 pip install -r requirements.txt
 ```
 
 This installs:
-- `bleak` - Bluetooth Low Energy library for Python
-- `requests` - For sending data to Flask API
+- **Server**: Flask, flask-cors
+- **BLE Client**: bleak, requests
 
 ### 2. ESP32 Setup
 
@@ -32,11 +38,13 @@ Your ESP32 is already configured! It:
 
 **Terminal 1 - Start Flask Server:**
 ```bash
+cd server
 python app.py
 ```
 
 **Terminal 2 - Start BLE Client:**
 ```bash
+cd ble_client
 python ble_client.py
 ```
 

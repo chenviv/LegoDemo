@@ -9,8 +9,9 @@ A smart LEGO building system that combines Unity 3D visualization, ESP32 motion 
 ```
 LegoDemo/
 ├── unity/              # Unity 3D application for LEGO brick visualization
-├── server/             # Web server and BLE client (separate processes)
+├── server/             # Flask web server (serves WebGL + REST API)
 │   └── static/webgl/   # Unity WebGL build artifacts
+├── ble_client/         # BLE client for ESP32 communication
 ├── firmware/           # ESP32 firmware with MPU6050 motion sensor
 └── docs/               # Documentation
 ```
@@ -25,19 +26,24 @@ Interactive 3D LEGO brick builder with WebGL export support.
 - WebGL build for browser-based interaction
 - Motion data visualization
 
-### Server (Flask + BLE Client)
-Flask web server and BLE client that serve the Unity WebGL build and handle Bluetooth communication.
-
-**⚠️ Note:** The Flask server and BLE client run as **two separate processes**:
-- **Flask Server**: Must run to serve web UI and provide REST API
-- **BLE Client**: Must run on a machine with Bluetooth hardware to connect to ESP32
+### Server (Flask)
+Flask web server that serves the Unity WebGL build and provides REST API for rotation data.
 
 **Key Features:**
-- Serves Unity WebGL application via Flask
-- BLE client connects to ESP32 and processes sensor data
-- Complementary filter for sensor fusion (accelerometer + gyroscope)
+- Serves Unity WebGL application
+- REST API for rotation state management
+- Can be containerized with Docker
+- CORS enabled for WebGL cross-origin requests
+
+### BLE Client
+Python BLE client that connects to ESP32 and forwards sensor data to the Flask server.
+
+**Key Features:**
+- Connects to ESP32 via Bluetooth Low Energy
+- Processes sensor data with complementary filter
+- Sensor fusion (accelerometer + gyroscope)
 - Axis mapping and drift compensation
-- Real-time data forwarding between ESP32 hardware and web interface
+- Posts rotation data to Flask API
 
 ### Firmware (ESP32)
 Arduino-based firmware for ESP32 with MPU6050 motion sensor integration.
@@ -55,7 +61,7 @@ Arduino-based firmware for ESP32 with MPU6050 motion sensor integration.
 - **Unity**: 2022.3 LTS or later (project created with 2022.3.62f3)
 - **Python**: 3.8+
 - **Arduino IDE**: For ESP32 firmware upload
-- **Bluetooth**: Hardware with BLE support (for Server)
+- **Bluetooth**: Hardware with BLE support (for BLE Client)
 
 ## Quick Start
 
@@ -68,15 +74,16 @@ cd firmware
 # Important: Place on flat, level surface for calibration
 ```
 
-### 2. Run Server (with BLE)
+### 2. Run Server and BLE Client
 ```bash
+# Terminal 1 - Flask Server
 cd server
 pip install -r requirements.txt
-
-# Terminal 1 - Flask Server
 python app.py
 
-# Terminal 2 - BLE Client (separate process)
+# Terminal 2 - BLE Client
+cd ble_client
+pip install -r requirements.txt
 python ble_client.py
 ```
 
@@ -97,9 +104,8 @@ cd unity
 
 ## Development Notes
 
-- The Flask server and BLE client run as separate processes for flexibility
-- BLE client must run on a machine with Bluetooth hardware
-- Flask server can run anywhere (locally or in cloud if BLE bridge is separate)
-- Consider separating BLE bridge for production deployments
+- Flask server (`server/`) can be containerized with Docker
+- BLE client (`ble_client/`) must run on host machine with Bluetooth hardware
+- Flask server can run anywhere (locally or in Docker)
 - Unity WebGL polls Flask API for rotation updates (consider WebSocket for lower latency)
 
