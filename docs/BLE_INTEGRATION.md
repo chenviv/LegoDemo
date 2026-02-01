@@ -100,6 +100,12 @@ AXIS_MAPPING = {
 - Check power is stable for ESP32
 - Reduce interference from other Bluetooth devices
 
+### MPU6050 sensor not detected or initialization fails
+- Verify I2C wiring (SDA to GPIO 21, SCL to GPIO 22)
+- Check MPU6050 power supply is stable at 3.3V
+- If AD0 pin is wired to GND, ensure ESP32 code uses I2C address 0x68 (default is 0x69)
+- Try running an I2C scanner sketch to confirm the sensor's address
+
 ### Rotation is too sensitive/not sensitive enough
 - The Python client applies a complementary filter with configurable parameters
 - Adjust `alpha` (gyro vs accel weight) or `gyro_deadband` in the `ComplementaryFilter` class
