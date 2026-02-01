@@ -2,6 +2,8 @@
 
 A smart LEGO building system that combines Unity 3D visualization, ESP32 motion sensing, and real-time Bluetooth communication.
 
+![Demo](demo.gif)
+
 ## Project Structure
 
 ```
