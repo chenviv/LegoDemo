@@ -11,8 +11,8 @@ The LegoDemo project consists of three main components that work together to cre
 │  (Frontend)     │◄────────►│  │ Flask Server (app.py)  │ │          │   (Firmware)    │
 │                 │          │  └────────────────────────┘ │◄────────►│                 │
 │                 │          │  ┌────────────────────────┐ │          │                 │
-│                 │          │  │ BLE Client (ble_      │ │          │                 │
-│                 │          │  │   client.py)          │ │          │                 │
+│                 │          │  │ BLE Client (ble_       │ │          │                 │
+│                 │          │  │   client.py)           │ │          │                 │
 │                 │          │  └────────────────────────┘ │          │                 │
 └─────────────────┘          └─────────────────────────────┘          └─────────────────┘
      Browser                   Server + BLE Client (separate)         Physical Device
@@ -49,12 +49,8 @@ The LegoDemo project consists of three main components that work together to cre
   - Connect to ESP32 via Bluetooth Low Energy
   - Process sensor data with complementary filter
   - Apply axis mapping and drift compensation
-  - Post rotation data to Flask API
-  - Provide REST API endpoints (`/api/rotation` GET/POST)
-  - Connect to ESP32 via Bluetooth Low Energy
-  - Process sensor data (complementary filter, axis mapping, drift compensation)
-  - Bridge data between ESP32 hardware and web client
-  - Real-time data synchronization via HTTP polling
+  - Bridge data between ESP32 hardware and Flask server
+  - Post rotation data to Flask API via HTTP
 
 ### 4. Firmware (Hardware)
 - **Technology**: Arduino/ESP32, MPU6050 sensor

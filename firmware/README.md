@@ -90,7 +90,6 @@ The firmware implements a BLE server with the following characteristics:
 - Verify MPU6050 power supply (3.3V)
 - Try sensor calibration
 - If AD0 is connected to GND, ensure code uses I2C address 0x68 instead of default 0x69
-- If AD0 is connected to GND, ensure code uses I2C address 0x68 instead of default 0x69
 
 ### BLE not visible:
 - Ensure Bluetooth is enabled on client device
@@ -105,6 +104,3 @@ Edit `ESP32_LEGO_BLE.ino` to customize:
 - Measurement interval (currently: `100` ms)
 - Data packet structure
 
-## License
-
-MIT
