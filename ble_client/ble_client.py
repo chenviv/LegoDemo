@@ -24,14 +24,23 @@ CONNECTION_TIMEOUT = 10.0  # Connection timeout in seconds
 # Rotation state
 current_rotation = {"x": 0.0, "y": 0.0, "z": 0.0}
 
-# WebSocket client
-sio = socketio.Client()
+# BLE connection state
+ble_connected = False
+ble_device_name = None
+
+# WebSocket client with reconnection enabled
+sio = socketio.Client(reconnection=True, reconnection_attempts=0, reconnection_delay=1, reconnection_delay_max=5)
 
 # WebSocket event handlers
 @sio.on('connect')
 def on_connect():
     """Handle connection to WebSocket server"""
     print("✓ Connected to WebSocket server")
+    # Re-send current BLE status when WebSocket reconnects
+    if ble_connected:
+        send_ble_status(True, ble_device_name)
+    else:
+        send_ble_status(False)
 
 @sio.on('disconnect')
 def on_disconnect():
@@ -159,14 +168,20 @@ def send_rotation_to_api():
 
 def send_ble_status(connected, device_name=None):
     """Send BLE connection status to server via WebSocket"""
+    global ble_connected, ble_device_name
+    
+    # Update tracked state
+    ble_connected = connected
+    ble_device_name = device_name if device_name else DEVICE_NAME
+    
     try:
         if sio.connected:
             status = {
                 'connected': connected,
-                'device_name': device_name if device_name else DEVICE_NAME
+                'device_name': ble_device_name
             }
             sio.emit('ble_status', status)
-            print(f"→ BLE Status: {'Connected' if connected else 'Disconnected'} to {device_name or DEVICE_NAME}")
+            print(f"→ BLE Status: {'Connected' if connected else 'Disconnected'} to {ble_device_name}")
         else:
             print("✗ WebSocket not connected, cannot send BLE status")
     except Exception as e:
@@ -250,6 +265,8 @@ async def connect_and_listen():
     try:
         print(f"Connecting to WebSocket server at {SERVER_URL}...")
         sio.connect(SERVER_URL)
+        # Send initial BLE status (disconnected) upon WebSocket connection
+        send_ble_status(False)
     except Exception as e:
         print(f"✗ Failed to connect to WebSocket server: {e}")
         print("Continuing anyway, will attempt to connect later...")
@@ -286,6 +303,10 @@ async def connect_and_listen():
                 print("Listening for sensor data...")
                 print("=" * 80)
 
+                # Track last status update time
+                last_status_update = time.time()
+                STATUS_UPDATE_INTERVAL = 2.0  # Send status every 2 seconds
+
                 # Keep the connection alive
                 try:
                     while True:
@@ -294,6 +315,23 @@ async def connect_and_listen():
                             print("\n⚠ Connection lost! Attempting to reconnect...")
                             send_ble_status(False)
                             break
+
+                        # Check WebSocket connection and reconnect if needed
+                        if not sio.connected:
+                            print("\n⚠ WebSocket disconnected! Attempting to reconnect...")
+                            try:
+                                sio.connect(SERVER_URL)
+                                # Re-send BLE status after reconnection
+                                if ble_connected:
+                                    send_ble_status(True, ble_device_name)
+                            except Exception as ws_error:
+                                print(f"✗ WebSocket reconnection failed: {ws_error}")
+
+                        # Periodically send BLE status (every 2 seconds)
+                        current_time = time.time()
+                        if current_time - last_status_update >= STATUS_UPDATE_INTERVAL:
+                            send_ble_status(True, DEVICE_NAME)
+                            last_status_update = current_time
 
                         # Check for pending timer interval update
                         if hasattr(on_timer_interval_update, 'pending_interval'):
