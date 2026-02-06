@@ -1,10 +1,7 @@
-from flask import Flask, request, jsonify, send_from_directory, Response, stream_with_context
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 import os
-import json
-import queue
-import threading
 
 app = Flask(__name__, static_folder='static')
 CORS(app)  # Enable CORS for Unity WebGL
@@ -22,22 +19,6 @@ ble_connection_status = {
     'connected': False,
     'device_name': None
 }
-
-# SSE subscribers
-rotation_subscribers = []
-rotation_lock = threading.Lock()
-
-def _broadcast_rotation(rotation):
-    payload = f"data: {json.dumps(rotation)}\n\n"
-    with rotation_lock:
-        dead = []
-        for q in rotation_subscribers:
-            try:
-                q.put_nowait(payload)
-            except queue.Full:
-                dead.append(q)
-        for q in dead:
-            rotation_subscribers.remove(q)
 
 @app.route('/')
 def index():
@@ -67,37 +48,12 @@ def set_rotation():
         current_rotation['y'] = float(data['y'])
         current_rotation['z'] = float(data['z'])
 
-        _broadcast_rotation(current_rotation)
-
         return jsonify({
             'success': True,
             'rotation': current_rotation
         })
     except ValueError:
         return jsonify({'error': 'Invalid rotation values'}), 400
-
-@app.route('/api/rotation/stream', methods=['GET'])
-def rotation_stream():
-    """Stream rotation updates via Server-Sent Events"""
-    q = queue.Queue(maxsize=100)
-    with rotation_lock:
-        rotation_subscribers.append(q)
-
-    def event_stream():
-        try:
-            # Send current rotation immediately
-            yield f"data: {json.dumps(current_rotation)}\n\n"
-            while True:
-                msg = q.get()
-                yield msg
-        except GeneratorExit:
-            pass
-        finally:
-            with rotation_lock:
-                if q in rotation_subscribers:
-                    rotation_subscribers.remove(q)
-
-    return Response(stream_with_context(event_stream()), mimetype='text/event-stream')
 
 @app.route('/health', methods=['GET'])
 def health_check():
