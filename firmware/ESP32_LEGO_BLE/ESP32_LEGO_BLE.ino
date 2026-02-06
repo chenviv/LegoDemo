@@ -9,6 +9,7 @@ MPU6050 mpu(Wire);
 
 BLEServer *pServer = NULL;
 BLECharacteristic *pCharacteristic = NULL;
+BLECharacteristic *pTimerIntervalCharacteristic = NULL;
 
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
@@ -30,6 +31,7 @@ struct SensorData {
 
 #define SERVICE_UUID "c10299b1-b9ba-451a-ad8c-17baeecd9480"
 #define CHARACTERISTIC_UUID "657b9056-09f8-4e0f-9d37-f76b6756e95e"
+#define TIMER_INTERVAL_WRITE_UUID "a7b3e6c8-4d2f-11ed-b878-0242ac120002"
 
 void IRAM_ATTR onTimer() { readSensor = true; }
 
@@ -37,6 +39,32 @@ class MyServerCallbacks : public BLEServerCallbacks {
   void onConnect(BLEServer *pServer) { deviceConnected = true; };
 
   void onDisconnect(BLEServer *pServer) { deviceConnected = false; }
+};
+
+class TimerIntervalCallbacks : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *pCharacteristic) {
+    uint8_t *data = pCharacteristic->getData();
+    size_t length = pCharacteristic->getValue().length();
+
+    if (length == 4) {
+      // Parse 4-byte unsigned integer (little-endian)
+      uint32_t newInterval = *(uint32_t *)data;
+
+      // Validate interval (10ms to 1000ms)
+      if (newInterval >= 10 && newInterval <= 1000) {
+        measurementInterval = newInterval;
+
+        // Update timer alarm
+        timerAlarm(timer, measurementInterval * 1000, true, 0);
+
+        Serial.printf("Timer interval updated to: %lums\n",
+                      measurementInterval);
+      } else {
+        Serial.printf("Invalid timer interval: %lu (must be 10-1000ms)\n",
+                      newInterval);
+      }
+    }
+  }
 };
 
 void setup() {
@@ -83,6 +111,13 @@ void setup() {
       BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY);
 
   pCharacteristic->addDescriptor(new BLE2902());
+
+  // Add writable characteristic for timer interval
+  pTimerIntervalCharacteristic = pService->createCharacteristic(
+      TIMER_INTERVAL_WRITE_UUID, BLECharacteristic::PROPERTY_WRITE);
+
+  pTimerIntervalCharacteristic->setCallbacks(new TimerIntervalCallbacks());
+
   pService->start();
 
   BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();

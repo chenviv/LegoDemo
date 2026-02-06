@@ -48,6 +48,17 @@ def on_error(data):
     """Handle error messages from server"""
     print(f"✗ Server error: {data.get('message', 'Unknown error')}")
 
+@sio.on('update_timer_interval')
+def on_timer_interval_update(data):
+    """Handle timer interval update request from server"""
+    interval = data.get('interval', 100)
+    print(f"← Received timer interval update request: {interval}ms")
+    # Store for writing to BLE
+    if hasattr(on_timer_interval_update, 'pending_interval'):
+        on_timer_interval_update.pending_interval = interval
+    else:
+        on_timer_interval_update.pending_interval = interval
+
 # Axis mapping configuration
 AXIS_MAPPING = {
     'unity_x': ('x', False),  # Pitch (front/back tilt)
@@ -267,6 +278,9 @@ async def connect_and_listen():
                 # Send BLE connected status
                 send_ble_status(True, DEVICE_NAME)
 
+                # Find writable characteristic for timer interval
+                TIMER_INTERVAL_WRITE_UUID = "a7b3e6c8-4d2f-11ed-b878-0242ac120002"
+
                 # Enable notifications
                 await client.start_notify(CHARACTERISTIC_UUID, notification_handler)
                 print("Listening for sensor data...")
@@ -280,6 +294,19 @@ async def connect_and_listen():
                             print("\n⚠ Connection lost! Attempting to reconnect...")
                             send_ble_status(False)
                             break
+
+                        # Check for pending timer interval update
+                        if hasattr(on_timer_interval_update, 'pending_interval'):
+                            interval = on_timer_interval_update.pending_interval
+                            delattr(on_timer_interval_update, 'pending_interval')
+                            try:
+                                # Write interval as 4-byte unsigned integer (little-endian)
+                                interval_bytes = struct.pack('<I', interval)
+                                await client.write_gatt_char(TIMER_INTERVAL_WRITE_UUID, interval_bytes)
+                                print(f"✓ Updated timer interval to {interval}ms")
+                            except Exception as e:
+                                print(f"✗ Failed to write timer interval: {e}")
+
                         await asyncio.sleep(1)
                 except KeyboardInterrupt:
                     print("\nStopping...")

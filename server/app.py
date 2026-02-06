@@ -117,6 +117,15 @@ def handle_connect():
 def handle_disconnect():
     """Handle client disconnection"""
     print('Client disconnected')
+    # If the disconnecting client was the one with BLE connection, update status
+    # Check if this was the BLE client by seeing if it had sent BLE status
+    # Reset BLE status and notify all remaining clients
+    global ble_connection_status
+    if ble_connection_status['connected']:
+        print('BLE client disconnected - resetting BLE status')
+        ble_connection_status['connected'] = False
+        ble_connection_status['device_name'] = None
+        socketio.emit('ble_status', ble_connection_status)
 
 @socketio.on('ble_status')
 def handle_ble_status(data):
@@ -150,6 +159,23 @@ def handle_rotation_update(data):
 
     except (ValueError, TypeError) as e:
         emit('error', {'message': f'Invalid rotation values: {str(e)}'})
+
+@socketio.on('update_timer_interval')
+def handle_timer_interval_update(data):
+    """Handle timer interval update request from UI"""
+    try:
+        interval = int(data.get('interval', 100))
+
+        if interval < 10 or interval > 1000:
+            emit('error', {'message': 'Timer interval must be between 10 and 1000 ms'})
+            return
+
+        # Forward to BLE client
+        emit('update_timer_interval', {'interval': interval}, broadcast=True)
+        print(f"Timer interval update request: {interval}ms")
+
+    except (ValueError, TypeError) as e:
+        emit('error', {'message': f'Invalid timer interval: {str(e)}'})
 
 @app.route('/webgl/<path:path>')
 def serve_webgl(path):
