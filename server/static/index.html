@@ -264,67 +264,50 @@
         // Unity WebGL loader
         var unityInstance;
         var canvas = document.querySelector("#unity-canvas");
-        var isInputFocused = false;
 
-        // Prevent Unity from capturing keyboard input when typing in input fields
-        document.querySelectorAll('input[type="number"]').forEach(input => {
-            input.addEventListener('focus', function() {
-                isInputFocused = true;
-                // Disable Unity canvas completely when input is focused
-                if (canvas) {
-                    canvas.style.pointerEvents = 'none';
-                    canvas.blur();
-                    canvas.tabIndex = -1;
-                }
-            });
-            input.addEventListener('blur', function() {
-                isInputFocused = false;
-                // Re-enable Unity canvas
-                if (canvas) {
-                    canvas.style.pointerEvents = 'auto';
-                    canvas.tabIndex = -1; // Keep it non-focusable
-                }
-            });
+        // Intercept Unity's keyboard capture before Unity loads
+        const originalAddEventListener = document.addEventListener;
+        const originalWindowAddEventListener = window.addEventListener;
+        const unityKeyboardListeners = [];
 
-            // Stop all keyboard events from propagating except Enter
-            input.addEventListener('keydown', function(e) {
-                if (e.key !== 'Enter') {
-                    e.stopPropagation();
-                }
-            }, false);
-            input.addEventListener('keyup', function(e) {
-                if (e.key !== 'Enter') {
-                    e.stopPropagation();
-                }
-            }, false);
-            input.addEventListener('keypress', function(e) {
-                if (e.key !== 'Enter') {
-                    e.stopPropagation();
-                }
-            }, false);
-        });
+        // Override document.addEventListener to intercept Unity's keyboard listeners
+        document.addEventListener = function(type, listener, options) {
+            if (type === 'keydown' || type === 'keyup' || type === 'keypress') {
+                // Store Unity's keyboard listeners but wrap them
+                unityKeyboardListeners.push({ type, listener, options, element: document });
 
-        // Completely block Unity from receiving keyboard events when input is focused (except Enter)
-        document.addEventListener('keydown', function(e) {
-            if (isInputFocused && e.key !== 'Enter') {
-                e.stopImmediatePropagation();
-                return false;
+                // Create a wrapped listener that checks if an input is focused
+                const wrappedListener = function(e) {
+                    const activeElement = document.activeElement;
+                    if (activeElement && activeElement.tagName === 'INPUT') {
+                        // Don't call Unity's listener when input is focused
+                        return;
+                    }
+                    listener.call(this, e);
+                };
+
+                return originalAddEventListener.call(document, type, wrappedListener, options);
             }
-        }, true);
+            return originalAddEventListener.call(document, type, listener, options);
+        };
 
-        document.addEventListener('keyup', function(e) {
-            if (isInputFocused && e.key !== 'Enter') {
-                e.stopImmediatePropagation();
-                return false;
-            }
-        }, true);
+        // Override window.addEventListener similarly
+        window.addEventListener = function(type, listener, options) {
+            if (type === 'keydown' || type === 'keyup' || type === 'keypress') {
+                unityKeyboardListeners.push({ type, listener, options, element: window });
 
-        document.addEventListener('keypress', function(e) {
-            if (isInputFocused && e.key !== 'Enter') {
-                e.stopImmediatePropagation();
-                return false;
+                const wrappedListener = function(e) {
+                    const activeElement = document.activeElement;
+                    if (activeElement && activeElement.tagName === 'INPUT') {
+                        return;
+                    }
+                    listener.call(this, e);
+                };
+
+                return originalWindowAddEventListener.call(window, type, wrappedListener, options);
             }
-        }, true);
+            return originalWindowAddEventListener.call(window, type, listener, options);
+        };
 
         var script = document.createElement("script");
         script.src = "webgl/Build/webgl.loader.js";
@@ -343,6 +326,10 @@
             }).then((instance) => {
                 unityInstance = instance;
                 console.log("Unity loaded successfully!");
+
+                // Restore original addEventListener methods after Unity is loaded
+                document.addEventListener = originalAddEventListener;
+                window.addEventListener = originalWindowAddEventListener;
             }).catch((message) => {
                 console.error("Unity loading failed:", message);
             });
