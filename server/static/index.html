@@ -187,6 +187,7 @@
     <script>
         // API configuration
         const API_URL = 'http://localhost:5000/api/rotation';
+        const STREAM_URL = 'http://localhost:5000/api/rotation/stream';
 
         function applyRotation() {
             const xAngle = parseFloat(document.getElementById('x-angle').value) || 0;
@@ -208,16 +209,46 @@
             .then(response => response.json())
             .then(data => {
                 console.log('Rotation applied:', data);
-
-                // Send to Unity if available
-                if (typeof unityInstance !== 'undefined') {
-                    unityInstance.SendMessage('LegoBrick', 'SetRotation',
-                        JSON.stringify({ x: xAngle, y: yAngle, z: zAngle }));
-                }
             })
             .catch(error => {
                 console.error('Error applying rotation:', error);
             });
+        }
+
+        function updateRotationUI(rotation) {
+            const xInput = document.getElementById('x-angle');
+            const yInput = document.getElementById('y-angle');
+            const zInput = document.getElementById('z-angle');
+
+            if (!document.activeElement || document.activeElement.tagName !== 'INPUT') {
+                xInput.value = rotation.x;
+                yInput.value = rotation.y;
+                zInput.value = rotation.z;
+            }
+
+            if (typeof unityInstance !== 'undefined') {
+                unityInstance.SendMessage('LegoBrick', 'SetRotation', JSON.stringify(rotation));
+            }
+        }
+
+        function startRotationStream() {
+            if (!window.EventSource) {
+                console.warn('SSE not supported in this browser.');
+                return;
+            }
+
+            const source = new EventSource(STREAM_URL);
+            source.onmessage = function(event) {
+                try {
+                    const rotation = JSON.parse(event.data);
+                    updateRotationUI(rotation);
+                } catch (err) {
+                    console.error('Invalid rotation stream data:', err);
+                }
+            };
+            source.onerror = function(err) {
+                console.error('Rotation stream error:', err);
+            };
         }
 
         // Allow Enter key to apply rotation
@@ -226,6 +257,9 @@
                 applyRotation();
             }
         });
+
+        // Start SSE stream
+        startRotationStream();
 
         // Unity WebGL loader
         var unityInstance;
