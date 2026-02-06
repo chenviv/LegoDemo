@@ -17,6 +17,12 @@ current_rotation = {
     'z': 0.0
 }
 
+# Store BLE connection status
+ble_connection_status = {
+    'connected': False,
+    'device_name': None
+}
+
 # SSE subscribers
 rotation_subscribers = []
 rotation_lock = threading.Lock()
@@ -103,13 +109,28 @@ def health_check():
 def handle_connect():
     """Handle client connection"""
     print(f'Client connected')
-    # Send current rotation immediately upon connection
+    # Send current rotation and BLE status immediately upon connection
     emit('rotation_update', current_rotation)
+    emit('ble_status', ble_connection_status)
 
 @socketio.on('disconnect')
 def handle_disconnect():
     """Handle client disconnection"""
     print('Client disconnected')
+
+@socketio.on('ble_status')
+def handle_ble_status(data):
+    """Handle BLE connection status update from client"""
+    try:
+        ble_connection_status['connected'] = bool(data.get('connected', False))
+        ble_connection_status['device_name'] = data.get('device_name')
+
+        # Broadcast BLE status to all connected clients
+        emit('ble_status', ble_connection_status, broadcast=True)
+        print(f"BLE Status: {'Connected' if ble_connection_status['connected'] else 'Disconnected'}")
+
+    except Exception as e:
+        emit('error', {'message': f'Invalid BLE status: {str(e)}'})
 
 @socketio.on('rotation_update')
 def handle_rotation_update(data):
@@ -129,11 +150,6 @@ def handle_rotation_update(data):
 
     except (ValueError, TypeError) as e:
         emit('error', {'message': f'Invalid rotation values: {str(e)}'})
-
-@socketio.on('request_rotation')
-def handle_rotation_request():
-    """Handle request for current rotation"""
-    emit('rotation_update', current_rotation)
 
 @app.route('/webgl/<path:path>')
 def serve_webgl(path):

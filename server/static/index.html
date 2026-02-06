@@ -140,6 +140,58 @@
             line-height: 1.6;
         }
 
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 20px;
+        }
+
+        .led {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #ccc;
+            box-shadow: 0 0 5px rgba(0, 0, 0, 0.2);
+            transition: all 0.3s ease;
+        }
+
+        .led.connected {
+            background: #4ade80;
+            box-shadow: 0 0 15px rgba(74, 222, 128, 0.8);
+            animation: pulse 2s infinite;
+        }
+
+        .led.disconnected {
+            background: #ef4444;
+            box-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                box-shadow: 0 0 15px rgba(74, 222, 128, 0.8);
+            }
+            50% {
+                box-shadow: 0 0 25px rgba(74, 222, 128, 1);
+            }
+        }
+
+        .status-text {
+            flex: 1;
+            color: #555;
+            font-weight: 500;
+        }
+
+        .status-text .device-name {
+            font-size: 0.9em;
+            color: #888;
+            display: block;
+            margin-top: 2px;
+        }
+
         @media (max-width: 768px) {
             .content {
                 grid-template-columns: 1fr;
@@ -152,8 +204,18 @@
         <h1>🧱 LEGO Brick Rotator</h1>
 
         <div class="content">
-            <div class="unity-container">
-                <canvas id="unity-canvas"></canvas>
+            <div>
+                <div class="unity-container">
+                    <canvas id="unity-canvas"></canvas>
+                </div>
+
+                <div class="status-indicator">
+                    <div class="led disconnected" id="ble-led"></div>
+                    <div class="status-text">
+                        <span id="status-message">BLE Device: Disconnected</span>
+                        <span class="device-name" id="device-name"></span>
+                    </div>
+                </div>
             </div>
 
             <div class="controls">
@@ -210,11 +272,32 @@
                     updateRotationUI(rotation);
                 });
 
+                socket.on('ble_status', function(status) {
+                    console.log('BLE Status:', status);
+                    updateBLEStatus(status);
+                });
+
                 socket.on('error', function(data) {
                     console.error('Server error:', data.message);
                 });
             };
             document.head.appendChild(socketIOScript);
+        }
+
+        function updateBLEStatus(status) {
+            const led = document.getElementById('ble-led');
+            const statusMessage = document.getElementById('status-message');
+            const deviceName = document.getElementById('device-name');
+
+            if (status.connected) {
+                led.className = 'led connected';
+                statusMessage.textContent = 'BLE Device: Connected';
+                deviceName.textContent = status.device_name || 'ESP32_MPU6050_BLE';
+            } else {
+                led.className = 'led disconnected';
+                statusMessage.textContent = 'BLE Device: Disconnected';
+                deviceName.textContent = '';
+            }
         }
 
         function applyRotation() {

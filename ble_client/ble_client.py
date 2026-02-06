@@ -146,6 +146,22 @@ def send_rotation_to_api():
         print(f"✗ Failed to send rotation: {e}")
 
 
+def send_ble_status(connected, device_name=None):
+    """Send BLE connection status to server via WebSocket"""
+    try:
+        if sio.connected:
+            status = {
+                'connected': connected,
+                'device_name': device_name if device_name else DEVICE_NAME
+            }
+            sio.emit('ble_status', status)
+            print(f"→ BLE Status: {'Connected' if connected else 'Disconnected'} to {device_name or DEVICE_NAME}")
+        else:
+            print("✗ WebSocket not connected, cannot send BLE status")
+    except Exception as e:
+        print(f"✗ Failed to send BLE status: {e}")
+
+
 async def notification_handler(sender, data):
     """Handle BLE notifications from ESP32"""
     global last_timestamp
@@ -248,6 +264,9 @@ async def connect_and_listen():
             async with BleakClient(address, timeout=CONNECTION_TIMEOUT) as client:
                 print(f"Connected to {DEVICE_NAME}")
 
+                # Send BLE connected status
+                send_ble_status(True, DEVICE_NAME)
+
                 # Enable notifications
                 await client.start_notify(CHARACTERISTIC_UUID, notification_handler)
                 print("Listening for sensor data...")
@@ -259,12 +278,15 @@ async def connect_and_listen():
                         # Check if still connected
                         if not client.is_connected:
                             print("\n⚠ Connection lost! Attempting to reconnect...")
+                            send_ble_status(False)
                             break
                         await asyncio.sleep(1)
                 except KeyboardInterrupt:
                     print("\nStopping...")
                     await client.stop_notify(CHARACTERISTIC_UUID)
                     print("Disconnected")
+                    # Send BLE disconnected status
+                    send_ble_status(False)
                     # Disconnect from WebSocket
                     if sio.connected:
                         sio.disconnect()
@@ -272,10 +294,13 @@ async def connect_and_listen():
                 finally:
                     if client.is_connected:
                         await client.stop_notify(CHARACTERISTIC_UUID)
+                    # Send BLE disconnected status
+                    send_ble_status(False)
 
         except asyncio.TimeoutError:
             reconnect_count += 1
             print(f"\n✗ Connection timeout!")
+            send_ble_status(False)
             if reconnect_count < MAX_RECONNECT_ATTEMPTS:
                 delay = RECONNECT_DELAY_BASE * (2 ** reconnect_count)
                 print(f"Retrying in {delay} seconds... (Attempt {reconnect_count + 1}/{MAX_RECONNECT_ATTEMPTS})")
@@ -284,6 +309,7 @@ async def connect_and_listen():
         except BleakError as e:
             reconnect_count += 1
             print(f"\n✗ BLE Error: {e}")
+            send_ble_status(False)
             if reconnect_count < MAX_RECONNECT_ATTEMPTS:
                 delay = RECONNECT_DELAY_BASE * (2 ** reconnect_count)
                 print(f"Retrying in {delay} seconds... (Attempt {reconnect_count + 1}/{MAX_RECONNECT_ATTEMPTS})")
