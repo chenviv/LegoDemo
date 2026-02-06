@@ -7,8 +7,9 @@ The LegoDemo project consists of three main components that work together to cre
 ```
 ┌─────────────────┐          ┌─────────────────────────────┐          ┌─────────────────┐
 │                 │          │  Python Server (2 processes)│          │                 │
-│  Unity WebGL    │  HTTP    │  ┌────────────────────────┐ │   BLE    │   ESP32 + IMU   │
+│  Unity WebGL    │ WebSocket│  ┌────────────────────────┐ │   BLE    │   ESP32 + IMU   │
 │  (Frontend)     │◄────────►│  │ Flask Server (app.py)  │ │          │   (Firmware)    │
+│                 │          │  │  + Socket.IO           │ │          │                 │
 │                 │          │  └────────────────────────┘ │◄────────►│                 │
 │                 │          │  ┌────────────────────────┐ │          │                 │
 │                 │          │  │ BLE Client (ble_       │ │          │                 │
@@ -18,7 +19,7 @@ The LegoDemo project consists of three main components that work together to cre
      Browser                   Server + BLE Client (separate)         Physical Device
 ```
 
-**Note:** Flask server (`server/`) and BLE client (`ble_client/`) are in separate folders and can run on different machines. They communicate via HTTP (BLE client posts to Flask API endpoints).
+**Note:** Flask server (`server/`) and BLE client (`ble_client/`) are in separate folders and can run on different machines. They communicate via WebSocket (Socket.IO) for real-time bidirectional updates.
 
 ## Component Details
 
@@ -32,17 +33,19 @@ The LegoDemo project consists of three main components that work together to cre
 - **Output**: WebGL build deployed to `server/static/webgl/`
 
 ### 2. Server (Backend)
-- **Technology**: Python Flask
-- **Purpose**: Web server and REST API
+- **Technology**: Python Flask + Socket.IO
+- **Purpose**: Web server, REST API, and WebSocket server
 - **Location**: `server/` folder
 - **Responsibilities**:
   - Serve Unity WebGL application and static files
-  - Provide REST API for rotation data
+  - Provide REST API for rotation data (compatibility)
+  - Real-time WebSocket (Socket.IO) communication for rotation updates
   - Store current rotation state in memory
+  - Track and broadcast BLE connection status
   - Can be containerized with Docker
 
 ### 3. BLE Client (Hardware Bridge)
-- **Technology**: Python + Bleak (BLE library)
+- **Technology**: Python + Bleak (BLE library) + Socket.IO
 - **Purpose**: Bluetooth communication bridge
 - **Location**: `ble_client/` folder (separate from server)
 - **Responsibilities**:
@@ -50,7 +53,9 @@ The LegoDemo project consists of three main components that work together to cre
   - Process sensor data with complementary filter
   - Apply axis mapping and drift compensation
   - Bridge data between ESP32 hardware and Flask server
-  - Post rotation data to Flask API via HTTP
+  - Real-time WebSocket connection to Flask server for bidirectional updates
+  - Report BLE connection status to server
+  - Automatic reconnection with exponential backoff
 
 ### 4. Firmware (Hardware)
 - **Technology**: Arduino/ESP32, MPU6050 sensor
@@ -80,19 +85,44 @@ The LegoDemo project consists of three main components that work together to cre
 
 ### Request Flow
 
-**Current Implementation** (One-way: ESP32 → Server → Unity):
+**Current Implementation** (Real-time via WebSocket):
 
 1. **ESP32 Sensor Reading** → MPU6050 data read every 100ms via timer interrupt
 2. **BLE Transmission** → ESP32 broadcasts sensor data via BLE notifications
 3. **Python BLE Client** → Receives notifications and processes data (complementary filter, axis mapping, drift compensation)
-4. **HTTP POST** → BLE client posts rotation data to Flask API (`/api/rotation`)
+4. **WebSocket Emit** → BLE client emits rotation data to Flask server via Socket.IO (`rotation_update` event)
 5. **State Storage** → Flask stores current rotation in memory
-6. **Unity Polling** → Unity WebGL polls Flask API (`GET /api/rotation`) for updates
-7. **Visual Update** → Unity renders LEGO brick with new rotation
+6. **WebSocket Broadcast** → Flask broadcasts rotation updates to all connected WebSocket clients
+7. **Unity Real-time Update** → Unity WebGL receives rotation data via WebSocket (no polling)
+8. **Visual Update** → Unity renders LEGO brick with new rotation
 
-**Note**: User input in Unity web interface can also POST rotation values directly to the API for manual control.
+**Alternative REST API** (Available for compatibility):
+- `GET /api/rotation` - Retrieve current rotation state
+- `POST /api/rotation` - Update rotation manually
+
+**BLE Connection Status**:
+- BLE client reports connection status via WebSocket (`ble_status` event)
+- Server broadcasts status to all connected clients
+- Unity WebGL displays connection indicator
 
 ## Communication Protocols
+
+### WebSocket (Socket.IO)
+- **Purpose**: Real-time bidirectional communication
+- **Usage**:
+  - BLE client → Server: rotation updates, BLE connection status
+  - Server → Unity WebGL: rotation updates, BLE status broadcasts
+  - Server → BLE client: timer interval updates
+- **Advantages**:
+  - Low latency push-based updates
+  - Efficient bidirectional messaging
+  - Automatic reconnection support
+  - Event-based architecture
+- **Events**:
+  - `rotation_update` - Send/receive rotation data
+  - `ble_status` - BLE connection status updates
+  - `update_timer_interval` - ESP32 sampling rate control (10-1000ms)
+  - `connect`/`disconnect` - Connection lifecycle
 
 ### BLE (Bluetooth Low Energy)
 - **Purpose**: Hardware-to-software communication
@@ -108,30 +138,29 @@ The LegoDemo project consists of three main components that work together to cre
 - **Characteristic UUID**: `657b9056-09f8-4e0f-9d37-f76b6756e95e`
 - **Device Name**: `ESP32_MPU6050_BLE`
 
-### HTTP
-- **Purpose**: Browser-to-server communication
-- **Usage**: Request/response for commands and rotation data
-- **Current**: Polling-based updates from Unity to Flask
-- **Future**: Consider WebSocket for real-time bidirectional streaming
+### HTTP (REST API)
+- **Purpose**: Browser-to-server communication (legacy/compatibility)
+- **Usage**: Fallback REST endpoints for rotation data
+- **Endpoints**:
+  - `GET /api/rotation` - Retrieve current rotation
+  - `POST /api/rotation` - Update rotation manually
+  - `GET /health` - Health check
+- **Note**: Primary communication now uses WebSocket for better performance
 
 ## Technology Stack
 
 | Component | Technologies |
 |-----------|-------------|
-| **Frontend** | Unity 3D, WebGL, C# |
-| **Backend** | Python 3.8+, Flask, BLE libraries |
+| **Frontend** | Unity 3D, WebGL, C#, Socket.IO Client |
+| **Backend** | Python 3.8+, Flask, Flask-SocketIO, Socket.IO |
+| **BLE Bridge** | Python, Bleak, Socket.IO Client |
 | **Firmware** | Arduino, ESP32, MPU6050_light |
-| **Protocols** | HTTP, BLE, I2C |
+| **Protocols** | WebSocket (Socket.IO), HTTP, BLE, I2C |
 | **Build Tools** | Unity Build Pipeline, pip |
 
 ## Current Limitations
 
-### 1. Polling-Based Architecture
-- Unity WebGL polls Flask API for rotation updates instead of real-time push
-- **Impact**: Higher latency (~polling interval) and unnecessary network traffic
-- **Future**: Implement WebSocket for real-time bidirectional communication
-
-### 2. Separate Processes Required
+### 1. Separate Processes Required
 - Flask server and BLE client run as separate processes (requires manual coordination)
 - **Impact**: Two terminals needed, manual startup sequence, no integrated logging
 - **Future**: Consider process manager (systemd, supervisord) or integrate into single service
@@ -153,27 +182,11 @@ The LegoDemo project consists of three main components that work together to cre
 
 ## Future Architecture Improvements
 
-### 1. WebSocket for Real-Time Communication
+### 1. Separated BLE Bridge Service
 
-**Current Issue**: Unity WebGL polls Flask API repeatedly, causing latency and unnecessary requests.
+**Current Status**: ✅ **WebSocket communication implemented** - Flask server and BLE client now use Socket.IO for real-time bidirectional communication. ✅ **Dynamic timer interval control implemented** - UI allows adjusting ESP32 sample rate (10-1000ms) via WebSocket.
 
-**Proposed Architecture**:
-```
-┌─────────────┐         ┌─────────────┐         ┌─────────────┐
-│   Unity     │   WS    │   Flask     │   WS    │ BLE Client  │
-│   WebGL     │◄───────►│   Server    │◄───────►│   Process   │
-└─────────────┘         └─────────────┘         └─────────────┘
-```
-
-**Benefits**:
-- Real-time bidirectional communication
-- Lower latency (push updates immediately)
-- Reduced network overhead
-- Better for multiple concurrent users
-
-### 2. Separated BLE Bridge Service
-
-**Current Issue**: BLE client and Flask server run as separate processes without coordination, limiting scalability and deployment options.
+**Remaining Issue**: BLE client and Flask server run as separate processes without process management, limiting scalability and deployment options.
 
 **Proposed Architecture**:
 ```
@@ -191,7 +204,7 @@ The LegoDemo project consists of three main components that work together to cre
 - Better security isolation between components
 - Centralized management and monitoring
 
-### 3. Multi-Device Support via Device UID
+### 2. Multi-Device Support via Device UID
 
 **Current Limitation**: The `ble_client.py` connects to a single hardcoded device name and doesn't differentiate between multiple BLE servers.
 
@@ -230,14 +243,13 @@ devices = {
 - Scale to sensor networks with multiple ESP32 devices
 - Better device management and monitoring
 
-### 4. Scalability Considerations
+### 3. Scalability Considerations
 
-**Current State**: Single-process Flask server with polling, in-memory state, single ESP32 device.
+**Current State**: Single-process Flask server with WebSocket (Socket.IO), in-memory state, single ESP32 device. ✅ Dynamic timer interval control implemented.
 
 **Production Requirements**:
 - Message queue (Redis/RabbitMQ) for component communication
 - Session management to isolate user data
-- WebSocket implementation for real-time updates per user (future)
 - Device pool management and assignment
 
 **Load Distribution**:
@@ -279,7 +291,7 @@ devices = {
 - **Sensor Sampling Rate**: Configurable in firmware (trade-off: latency vs. power)
 - **Data Transmission**: Optimize payload size for BLE (28 bytes binary struct)
 - **WebGL Rendering**: Unity performance depends on browser/hardware
-- **Network Latency**: Currently using HTTP polling; WebSocket would reduce latency
+- **Network Latency**: ✅ **WebSocket implemented** - Real-time push updates with low latency (no polling overhead)
 
 ## References
 

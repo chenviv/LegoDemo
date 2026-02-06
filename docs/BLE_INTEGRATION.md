@@ -4,7 +4,7 @@ This guide explains how to connect your ESP32 with MPU6050 sensor to control the
 
 ## Overview
 
-The ESP32 sends sensor data via BLE → Python script receives it → Updates Flask API → Unity updates LEGO brick rotation
+The ESP32 sends sensor data via BLE → Python BLE client receives it → Sends via WebSocket to Flask server → Flask broadcasts to Unity WebGL → Unity updates LEGO brick rotation
 
 ## Setup
 
@@ -21,8 +21,8 @@ pip install -r requirements.txt
 ```
 
 This installs:
-- **Server**: Flask, flask-cors
-- **BLE Client**: bleak, requests
+- **Server**: Flask, flask-cors, flask-socketio, python-socketio
+- **BLE Client**: bleak, python-socketio, websocket-client
 
 ### 2. ESP32 Setup
 
@@ -36,21 +36,26 @@ Your ESP32 is already configured! It:
 
 ### 3. Running the System
 
+**Important:** Start the Flask server first, then the BLE client.
+
 **Terminal 1 - Start Flask Server:**
 ```bash
 cd server
 python app.py
+# Wait for "Running on http://0.0.0.0:5000" message
 ```
 
 **Terminal 2 - Start BLE Client:**
 ```bash
 cd ble_client
 python ble_client.py
+# Will connect to Flask WebSocket, then scan for ESP32
 ```
 
-**Terminal 3 - Open Web Interface (optional):**
+**Terminal 3 - Open Web Interface:**
 ```bash
-# Or just open http://localhost:5000 in browser
+# Open http://localhost:5000 in browser
+# WebSocket connection will be established automatically
 ```
 
 ## How It Works
@@ -64,8 +69,9 @@ The system processes sensor data through multiple stages:
 3. **Angle Calculation** → combines accelerometer (absolute) + gyroscope (rate) for stable angles
 4. **Drift Compensation** → detects stationary state and resets gyro drift
 5. **Axis Mapping** → converts ESP32 coordinate system to Unity's coordinate system
-6. **Flask API** → receives mapped rotation → stores current state
-7. **Unity WebGL** → polls API → updates 3D brick rotation
+6. **WebSocket Emit** → BLE client emits rotation data via Socket.IO to Flask server
+7. **Flask Broadcast** → Flask broadcasts rotation updates to all connected WebSocket clients
+8. **Unity WebGL** → receives real-time updates via WebSocket → updates 3D brick rotation
 
 ### Axis Mapping
 
@@ -100,6 +106,18 @@ AXIS_MAPPING = {
 - Check power is stable for ESP32
 - Reduce interference from other Bluetooth devices
 
+### "Failed to connect to WebSocket server" or WebSocket errors
+- Make sure Flask server is running first (before BLE client)
+- Check Flask server shows "Running on http://0.0.0.0:5000"
+- Verify no firewall blocking port 5000
+- Try restarting both Flask server and BLE client
+
+### BLE client connects but Unity doesn't update
+- Check browser console (F12) for WebSocket connection status
+- Verify Unity WebGL is loaded and connected to WebSocket
+- Look for rotation update events in browser console
+- Restart Flask server to reset WebSocket connections
+
 ### MPU6050 sensor not detected or initialization fails
 - Verify I2C wiring (SDA to GPIO 21, SCL to GPIO 22)
 - Check MPU6050 power supply is stable at 3.3V
@@ -112,10 +130,11 @@ AXIS_MAPPING = {
 - Modify axis mapping or implement custom scaling in `ble_client.py`
 - See "Advanced Usage" section for customizing the sensor fusion filter
 
-### Flask API not receiving data
+### Data not reaching Unity WebGL
 - Make sure `app.py` is running in another terminal
-- Check the API_URL in `ble_client.py` matches your Flask server
+- Check the SERVER_URL in `ble_client.py` matches your Flask server (default: `http://localhost:5000`)
 - Look for "Sent rotation" messages in the BLE client output
+- Verify WebSocket connection is established in browser console
 
 ## Data Format
 
@@ -176,14 +195,23 @@ class ComplementaryFilter:
         # Other internal state: angle_x, angle_y, angle_z, stationary_counter
 ```
 
-The ESP32 uses a hardware timer interrupt for precise timing. Current interval: **100ms** (10 Hz).
+The ESP32 uses a hardware timer interrupt for precise timing. Default interval: **100ms** (10 Hz).
 
-To change it, modify this line in the firmware:
+**Dynamic Timer Interval Control:**
+
+You can change the sampling rate in real-time from the web UI (when BLE is connected):
+- Range: 10ms to 1000ms
+- Default: 100ms (10 Hz)
+- The BLE client sends the update via WebSocket to the server, which forwards it to the BLE client
+- The BLE client writes the new interval to a writable BLE characteristic
+- ESP32 immediately updates its hardware timer
+
+Faster updates = smoother rotation, but more power consumption and BLE bandwidth usage.
+
+You can also set the default interval in the firmware:
 ```cpp
 unsigned long measurementInterval = 100; // milliseconds
 ```
-
-Faster updates = smoother rotation, but more power consumption and BLE bandwidth usage.
 
 ## Testing Without ESP32
 
@@ -209,22 +237,27 @@ Characteristic UUID: 657b9056-09f8-4e0f-9d37-f76b6756e95e
 When running successfully, you should see:
 ```
 ================================================================================
-ESP32 BLE to LEGO Brick Rotator
+ESP32 BLE to LEGO Brick Rotator with WebSocket
 ================================================================================
 Looking for device: ESP32_MPU6050_BLE
-API endpoint: http://localhost:5000/api/rotation
+WebSocket server: http://localhost:5000
 Filter alpha: 0.98 (98% gyro, 2% accel)
 Max reconnection attempts: 5
 Connection timeout: 10.0s
 ================================================================================
 
+Connecting to WebSocket server at http://localhost:5000...
+✓ Connected to WebSocket server
+→ BLE Status: Disconnected to ESP32_MPU6050_BLE
 Scanning for 'ESP32_MPU6050_BLE'...
 Found ESP32_MPU6050_BLE at XX:XX:XX:XX:XX:XX
 Connecting to XX:XX:XX:XX:XX:XX...
 ✓ Connected to ESP32_MPU6050_BLE
+→ BLE Status: Connected to ESP32_MPU6050_BLE
+Listening for sensor data...
+================================================================================
 
 RAW: [T=12345ms] Acc: X=0.01 Y=-0.02 Z=1.00 | Gyro: X=0.5 Y=-0.3 Z=0.0 | dt=100.0ms
-ESP32: Angles: X=2.9° Y=-2.9° Z=0.0°
-Unity: X=2.9° Y=0.0° Z=2.9°
-✓ Sent rotation: X=2.9° Y=0.0° Z=2.9°
+FILTERED: X=2.9° Y=-2.9° Z=0.0°
+→ Sent rotation: X=2.9° Y=0.0° Z=2.9°
 ```

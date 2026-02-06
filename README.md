@@ -27,10 +27,11 @@ Interactive 3D LEGO brick builder with WebGL export support.
 - Motion data visualization
 
 ### Server (Flask)
-Flask web server that serves the Unity WebGL build and provides REST API for rotation data.
+Flask web server that serves the Unity WebGL build and provides REST API and WebSocket for rotation data.
 
 **Key Features:**
 - Serves Unity WebGL application
+- WebSocket (Socket.IO) for real-time bidirectional communication
 - REST API for rotation state management
 - Can be containerized with Docker
 - CORS enabled for WebGL cross-origin requests
@@ -43,7 +44,9 @@ Python BLE client that connects to ESP32 and forwards sensor data to the Flask s
 - Processes sensor data with complementary filter
 - Sensor fusion (accelerometer + gyroscope)
 - Axis mapping and drift compensation
-- Posts rotation data to Flask API
+- WebSocket (Socket.IO) connection to Flask server for real-time updates
+- Automatic reconnection with exponential backoff
+- BLE connection status reporting
 
 ### Firmware (ESP32)
 Arduino-based firmware for ESP32 with MPU6050 motion sensor integration.
@@ -76,15 +79,17 @@ cd firmware
 
 ### 2. Run Server and BLE Client
 ```bash
-# Terminal 1 - Flask Server
+# Terminal 1 - Flask Server (start this first)
 cd server
 pip install -r requirements.txt
 python app.py
 
-# Terminal 2 - BLE Client
+# Terminal 2 - BLE Client (start after server is running)
 cd ble_client
 pip install -r requirements.txt
 python ble_client.py
+
+# Access web interface at http://localhost:5000
 ```
 
 ### 3. Build Unity WebGL (Optional)
@@ -107,5 +112,10 @@ cd unity
 - Flask server (`server/`) can be containerized with Docker
 - BLE client (`ble_client/`) must run on host machine with Bluetooth hardware
 - Flask server can run anywhere (locally or in Docker)
-- Unity WebGL polls Flask API for rotation updates (consider WebSocket for lower latency)
+- **WebSocket Implementation**: Real-time bidirectional communication via Socket.IO
+  - Unity WebGL receives rotation updates via WebSocket (no polling)
+  - BLE client sends rotation data and connection status via WebSocket
+  - Server broadcasts updates to all connected clients
+  - Fallback REST API still available for compatibility
+- **Data Flow**: ESP32 → BLE → BLE Client → WebSocket → Flask Server → WebSocket → Unity WebGL
 
