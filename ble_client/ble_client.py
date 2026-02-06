@@ -1,6 +1,6 @@
 import asyncio
 import struct
-import requests
+import socketio
 import math
 import time
 from bleak import BleakClient, BleakScanner
@@ -10,8 +10,8 @@ from bleak.exc import BleakError
 SERVICE_UUID = "c10299b1-b9ba-451a-ad8c-17baeecd9480"
 CHARACTERISTIC_UUID = "657b9056-09f8-4e0f-9d37-f76b6756e95e"
 
-# Flask API endpoint
-API_URL = "http://localhost:5000/api/rotation"
+# Flask server WebSocket endpoint
+SERVER_URL = "http://localhost:5000"
 
 # Device name
 DEVICE_NAME = "ESP32_MPU6050_BLE"
@@ -23,6 +23,30 @@ CONNECTION_TIMEOUT = 10.0  # Connection timeout in seconds
 
 # Rotation state
 current_rotation = {"x": 0.0, "y": 0.0, "z": 0.0}
+
+# WebSocket client
+sio = socketio.Client()
+
+# WebSocket event handlers
+@sio.on('connect')
+def on_connect():
+    """Handle connection to WebSocket server"""
+    print("✓ Connected to WebSocket server")
+
+@sio.on('disconnect')
+def on_disconnect():
+    """Handle disconnection from WebSocket server"""
+    print("✗ Disconnected from WebSocket server")
+
+@sio.on('rotation_update')
+def on_rotation_update(data):
+    """Handle rotation updates from server (for bidirectional communication)"""
+    print(f"← Received rotation update from server: {data}")
+
+@sio.on('error')
+def on_error(data):
+    """Handle error messages from server"""
+    print(f"✗ Server error: {data.get('message', 'Unknown error')}")
 
 # Axis mapping configuration
 AXIS_MAPPING = {
@@ -110,14 +134,14 @@ class SensorData:
 
 
 def send_rotation_to_api():
-    """Send current rotation to Flask API"""
+    """Send current rotation to Flask server via WebSocket"""
     try:
-        response = requests.post(API_URL, json=current_rotation, timeout=1)
-        if response.status_code == 200:
-            print(f"Sent rotation: X={current_rotation['x']:.1f}° "
+        if sio.connected:
+            sio.emit('rotation_update', current_rotation)
+            print(f"→ Sent rotation: X={current_rotation['x']:.1f}° "
                   f"Y={current_rotation['y']:.1f}° Z={current_rotation['z']:.1f}°")
         else:
-            print(f"✗ API error: {response.status_code}")
+            print("✗ WebSocket not connected, skipping rotation update")
     except Exception as e:
         print(f"✗ Failed to send rotation: {e}")
 
@@ -195,6 +219,14 @@ async def connect_and_listen():
     """Main function to connect to ESP32 and listen for data with reconnection support"""
     reconnect_count = 0
 
+    # Connect to WebSocket server first
+    try:
+        print(f"Connecting to WebSocket server at {SERVER_URL}...")
+        sio.connect(SERVER_URL)
+    except Exception as e:
+        print(f"✗ Failed to connect to WebSocket server: {e}")
+        print("Continuing anyway, will attempt to connect later...")
+
     while reconnect_count < MAX_RECONNECT_ATTEMPTS:
         try:
             # Find the device
@@ -233,6 +265,9 @@ async def connect_and_listen():
                     print("\nStopping...")
                     await client.stop_notify(CHARACTERISTIC_UUID)
                     print("Disconnected")
+                    # Disconnect from WebSocket
+                    if sio.connected:
+                        sio.disconnect()
                     return  # Exit completely on user interrupt
                 finally:
                     if client.is_connected:
@@ -264,14 +299,18 @@ async def connect_and_listen():
 
     print(f"\n✗ Failed to connect after {MAX_RECONNECT_ATTEMPTS} attempts. Exiting.")
 
+    # Disconnect from WebSocket on exit
+    if sio.connected:
+        sio.disconnect()
+
 
 def main():
     """Entry point"""
     print("=" * 80)
-    print("ESP32 BLE to LEGO Brick Rotator")
+    print("ESP32 BLE to LEGO Brick Rotator with WebSocket")
     print("=" * 80)
     print(f"Looking for device: {DEVICE_NAME}")
-    print(f"API endpoint: {API_URL}")
+    print(f"WebSocket server: {SERVER_URL}")
     print(f"Filter alpha: {comp_filter.alpha} (98% gyro, 2% accel)")
     print(f"Max reconnection attempts: {MAX_RECONNECT_ATTEMPTS}")
     print(f"Connection timeout: {CONNECTION_TIMEOUT}s")
@@ -282,8 +321,12 @@ def main():
         asyncio.run(connect_and_listen())
     except KeyboardInterrupt:
         print("\nProgram terminated by user")
+        if sio.connected:
+            sio.disconnect()
     except Exception as e:
         print(f"\n✗ Fatal error: {e}")
+        if sio.connected:
+            sio.disconnect()
 
 
 if __name__ == "__main__":

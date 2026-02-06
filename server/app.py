@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify, send_from_directory, Response, stream_with_context
 from flask_cors import CORS
+from flask_socketio import SocketIO, emit
 import os
 import json
 import queue
@@ -7,6 +8,7 @@ import threading
 
 app = Flask(__name__, static_folder='static')
 CORS(app)  # Enable CORS for Unity WebGL
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 # Store current rotation state
 current_rotation = {
@@ -96,10 +98,47 @@ def health_check():
     """Health check endpoint"""
     return jsonify({'status': 'healthy'})
 
+# WebSocket event handlers
+@socketio.on('connect')
+def handle_connect():
+    """Handle client connection"""
+    print(f'Client connected')
+    # Send current rotation immediately upon connection
+    emit('rotation_update', current_rotation)
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    """Handle client disconnection"""
+    print('Client disconnected')
+
+@socketio.on('rotation_update')
+def handle_rotation_update(data):
+    """Handle rotation update from BLE client"""
+    try:
+        # Validate input
+        if not all(key in data for key in ['x', 'y', 'z']):
+            emit('error', {'message': 'Missing rotation parameters'})
+            return
+
+        current_rotation['x'] = float(data['x'])
+        current_rotation['y'] = float(data['y'])
+        current_rotation['z'] = float(data['z'])
+
+        # Broadcast to all connected clients (including Unity WebGL)
+        emit('rotation_update', current_rotation, broadcast=True)
+
+    except (ValueError, TypeError) as e:
+        emit('error', {'message': f'Invalid rotation values: {str(e)}'})
+
+@socketio.on('request_rotation')
+def handle_rotation_request():
+    """Handle request for current rotation"""
+    emit('rotation_update', current_rotation)
+
 @app.route('/webgl/<path:path>')
 def serve_webgl(path):
     """Serve WebGL files"""
     return send_from_directory('static/webgl', path)
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    socketio.run(app, debug=True, host='0.0.0.0', port=5000)
