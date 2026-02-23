@@ -97,8 +97,8 @@ class ComplementaryFilter:
         Update filter with drift compensation
         """
         # Calculate tilt angles from accelerometer
-        acc_angle_x = math.atan2(acc_y, math.sqrt(acc_x**2 + acc_z**2)) * 180 / math.pi
-        acc_angle_y = math.atan2(-acc_x, math.sqrt(acc_y**2 + acc_z**2)) * 180 / math.pi
+        acc_angle_x = math.atan2(-acc_y, math.sqrt(acc_x**2 + acc_z**2)) * 180 / math.pi # y is inverted to match Unity's coordinate system
+        acc_angle_y = math.atan2(acc_x, math.sqrt(acc_y**2 + acc_z**2)) * 180 / math.pi
 
         # Apply deadband to gyroscope (ignore small values that cause drift)
         gyro_x_filtered = gyro_x if abs(gyro_x) > self.gyro_deadband else 0.0
@@ -169,11 +169,11 @@ def send_rotation_to_api():
 def send_ble_status(connected, device_name=None):
     """Send BLE connection status to server via WebSocket"""
     global ble_connected, ble_device_name
-    
+
     # Update tracked state
     ble_connected = connected
     ble_device_name = device_name if device_name else DEVICE_NAME
-    
+
     try:
         if sio.connected:
             status = {
