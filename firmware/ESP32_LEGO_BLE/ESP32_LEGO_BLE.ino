@@ -5,17 +5,21 @@
 #include <MPU6050_light.h>
 #include <Wire.h>
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
 MPU6050 mpu(Wire);
 
 BLEServer *pServer = NULL;
 BLECharacteristic *pCharacteristic = NULL;
 BLECharacteristic *pTimerIntervalCharacteristic = NULL;
 
+char *deviceName = "ESP32_MPU6050_BLE";
+
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
 
-hw_timer_t *timer = NULL;
-volatile bool readSensor = false;
+static TaskHandle_t sensorTaskHandle = NULL;
 unsigned long measurementInterval = 100; // milliseconds
 
 // Compact binary struct - each field on own line
@@ -33,7 +37,45 @@ struct SensorData {
 #define CHARACTERISTIC_UUID "657b9056-09f8-4e0f-9d37-f76b6756e95e"
 #define TIMER_INTERVAL_WRITE_UUID "a7b3e6c8-4d2f-11ed-b878-0242ac120002"
 
-void IRAM_ATTR onTimer() { readSensor = true; }
+// Using vTaskDelay in the sensor task instead of a hw timer ISR.
+
+// Sensor task: waits for timer notifications and reads/notifications when
+// connected
+void sensorTask(void *pvParameters) {
+  for (;;) {
+    if (deviceConnected) {
+      // update internal sensor values
+      mpu.update();
+
+      SensorData data;
+      data.timestamp = millis();
+      data.accX = mpu.getAccX();
+      data.accY = mpu.getAccY();
+      data.accZ = mpu.getAccZ();
+      data.gyroX = mpu.getGyroX();
+      data.gyroY = mpu.getGyroY();
+      data.gyroZ = mpu.getGyroZ();
+
+      pCharacteristic->setValue((uint8_t *)&data, sizeof(SensorData));
+      pCharacteristic->notify();
+
+      // Debug Print values
+      Serial.printf(
+          "\n--- Timestamp: %ums (device should be FLAT and STILL) ---\n",
+          data.timestamp);
+      Serial.printf(
+          "Accel: X=%.3f Y=%.3f Z=%.3f (mag=%.3f)\n", mpu.getAccX(),
+          mpu.getAccY(), mpu.getAccZ(),
+          sqrt(sq(mpu.getAccX()) + sq(mpu.getAccY()) + sq(mpu.getAccZ())));
+      Serial.printf("Gyro:  X=%.3f Y=%.3f Z=%.3f\n", mpu.getGyroX(),
+                    mpu.getGyroY(), mpu.getGyroZ());
+      Serial.println("Expected: Accel mag ≈ 1.0, Gyro all ≈ 0");
+    }
+
+    // Wait for the configured measurement interval
+    vTaskDelay(pdMS_TO_TICKS(measurementInterval));
+  }
+}
 
 class MyServerCallbacks : public BLEServerCallbacks {
   void onConnect(BLEServer *pServer) { deviceConnected = true; };
@@ -53,10 +95,6 @@ class TimerIntervalCallbacks : public BLECharacteristicCallbacks {
       // Validate interval (10ms to 1000ms)
       if (newInterval >= 10 && newInterval <= 1000) {
         measurementInterval = newInterval;
-
-        // Update timer alarm
-        timerAlarm(timer, measurementInterval * 1000, true, 0);
-
         Serial.printf("Timer interval updated to: %lums\n",
                       measurementInterval);
       } else {
@@ -101,7 +139,7 @@ void setup() {
   Serial.println(mpu.getGyroZoffset());
 
   // BLE setup
-  BLEDevice::init("ESP32_MPU6050_BLE");
+  BLEDevice::init(deviceName);
   pServer = BLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
 
@@ -128,52 +166,18 @@ void setup() {
   Serial.println(
       "Waiting for client (28-byte binary packets with timestamp)...");
 
-  // Setup hardware timer interrupt (ESP32 v3.x API)
-  timer = timerBegin(1000000);           // 1MHz timer frequency
-  timerAttachInterrupt(timer, &onTimer); // Attach ISR
-  timerAlarm(timer, measurementInterval * 1000, true,
-             0); // microseconds, autoreload
+  // Create sensor task that polls at `measurementInterval`
+  xTaskCreatePinnedToCore(sensorTask, "sensorTask", 4096, NULL, 1,
+                          &sensorTaskHandle, 1);
 
-  Serial.printf("Timer interrupt enabled: %lums interval\n",
-                measurementInterval);
+  Serial.printf("Sensor task started: %lums interval\n", measurementInterval);
 }
 
 void loop() {
-  // Only read sensor when timer interrupt fires
-  if (deviceConnected && readSensor) {
-    readSensor = false; // Clear flag
-
-    mpu.update();
-
-    SensorData data;
-
-    // Assign each field explicitly on own line
-    data.timestamp = millis();
-    data.accX = mpu.getAccX();
-    data.accY = mpu.getAccY();
-    data.accZ = mpu.getAccZ();
-    data.gyroX = mpu.getGyroX();
-    data.gyroY = mpu.getGyroY();
-    data.gyroZ = mpu.getGyroZ();
-
-    pCharacteristic->setValue((uint8_t *)&data, sizeof(SensorData));
-    pCharacteristic->notify();
-
-    // Debug Print values
-    Serial.printf(
-        "\n--- Timestamp: %ums (device should be FLAT and STILL) ---\n",
-        data.timestamp);
-    Serial.printf(
-        "Accel: X=%.3f Y=%.3f Z=%.3f (mag=%.3f)\n", mpu.getAccX(),
-        mpu.getAccY(), mpu.getAccZ(),
-        sqrt(sq(mpu.getAccX()) + sq(mpu.getAccY()) + sq(mpu.getAccZ())));
-    Serial.printf("Gyro:  X=%.3f Y=%.3f Z=%.3f\n", mpu.getGyroX(),
-                  mpu.getGyroY(), mpu.getGyroZ());
-    Serial.println("Expected: Accel mag ≈ 1.0, Gyro all ≈ 0");
-  }
-
-  // Yield to RTOS and reduce power consumption
-  delay(1);
+  // Main loop only handles connection state; sensor reads are handled
+  // in `sensorTask` which blocks on timer notifications.
+  delay(1000);
+  Serial.printf("%s is alive\n", deviceName);
 
   // Connection handling
   if (!deviceConnected && oldDeviceConnected) {
